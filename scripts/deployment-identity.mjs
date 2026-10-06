@@ -33,5 +33,12 @@ export function deploymentIdentity(env, config) {
       && config.allowedRoutes.every(route => typeof route === 'string')) {
     identity.allowedRoutes = [...config.allowedRoutes];
   }
+  // 5단계부터는 원본 자료 주소(쿼리·계정 정보 없는 HTTPS 경로, 비밀값 없음)도 공개 확인 파일에 싣는다.
+  if (config.step >= 5 && typeof config.originalApiUrl === 'string') {
+    let original;
+    try { original = new URL(config.originalApiUrl); } catch { original = null; }
+    if (original && original.protocol === 'https:' && !original.username && !original.password
+        && !original.search && !original.hash) identity.originalApiUrl = original.href;
+  }
   return identity;
 }
