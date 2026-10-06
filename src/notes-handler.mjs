@@ -1,8 +1,10 @@
 // 가상 메모 CRUD 처리입니다. api/notes.js가 이 함수를 그대로 내보냅니다.
 // 로그인 확인은 틀의 src/verify-login.mjs가 합니다. 사용자 ID는 그 결과(principal.userId)만 쓰고,
 // 요청 본문·헤더·쿼리의 userId·owner_id·role 같은 값은 읽지 않습니다.
-// 주의(4단계 과제): 아직 소유자 검사를 하지 않아서 GET·PUT·DELETE /:id는 로그인만 하면
-// 남의 메모에도 닿습니다. 목록 GET만 본인 메모로 좁혀 둡니다.
+// 4단계: 모든 메모 요청에서 서버가 확인한 사용자 ID와 DB의 owner_id를 비교합니다.
+// GET·PUT·DELETE /:id는 기존 행의 owner_id가 본인일 때만 처리하고, 남의 메모·주인 없는 메모·없는 메모는
+// 모두 같은 404로 답합니다(존재 여부를 알려 주지 않음). 쓰기·삭제에도 owner_id 조건을 다시 걸고,
+// 수정은 owner_id를 바꾸지 않으며 수정 뒤 행의 소유자도 본인인지 확인합니다.
 // 키 값은 응답·로그에 넣지 않고, 오류 응답에는 일반 오류 이름만 담습니다.
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
@@ -93,20 +95,28 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {
         if (error) throw error;
         return response.status(201).json({ id });
       }
+      // 기존 행의 owner_id를 DB에서 읽어 확인된 사용자 ID와 비교한다. URL·본문의 값은 쓰지 않는다.
+      const { data: existing, error: readError } = await notes
+        .select('id, title, content, owner_id').eq('id', rawId).maybeSingle();
+      if (readError) throw readError;
+      if (!existing || existing.owner_id !== principal.userId) {
+        return response.status(404).json({ error: 'NOT_FOUND' });
+      }
       if (request.method === 'GET') {
-        const { data, error } = await notes.select('id, title, content').eq('id', rawId).maybeSingle();
-        if (error) throw error;
-        if (!data) return response.status(404).json({ error: 'NOT_FOUND' });
-        return response.status(200).json({ id: data.id, title: data.title, body: data.content });
+        return response.status(200).json({ id: existing.id, title: existing.title, body: existing.content });
       }
       if (request.method === 'PUT') {
-        const { data, error } = await notes.update({ title: input.title, content: input.body })
-          .eq('id', rawId).select('id');
+        // owner_id는 바꾸지 않고, 조건에도 owner_id를 걸어 그 사이 소유자가 바뀐 행은 건드리지 않는다.
+        const { data, error } = await deps.db.from('notes')
+          .update({ title: input.title, content: input.body })
+          .eq('id', rawId).eq('owner_id', principal.userId).select('id, owner_id');
         if (error) throw error;
         if (!data?.length) return response.status(404).json({ error: 'NOT_FOUND' });
+        if (data.some(row => row.owner_id !== principal.userId)) throw new Error('owner changed');
         return response.status(200).json({ id: rawId });
       }
-      const { data, error } = await notes.delete().eq('id', rawId).select('id');
+      const { data, error } = await deps.db.from('notes').delete()
+        .eq('id', rawId).eq('owner_id', principal.userId).select('id');
       if (error) throw error;
       if (!data?.length) return response.status(404).json({ error: 'NOT_FOUND' });
       return response.status(204).end();

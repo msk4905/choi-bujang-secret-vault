@@ -16,8 +16,8 @@ function fakeDb(rows) {
       let wantRows = false;
       const run = () => {
         const hit = rows.filter(row => filters.every(([k, v]) => row[k] === v));
-        if (action === 'select') return hit.map(({ id, title, content }) => ({ id, title, content }));
-        if (action === 'update') { hit.forEach(row => Object.assign(row, patch)); return hit.map(row => ({ id: row.id })); }
+        if (action === 'select') return hit.map(row => ({ ...row }));
+        if (action === 'update') { hit.forEach(row => Object.assign(row, patch)); return hit.map(row => ({ id: row.id, owner_id: row.owner_id })); }
         for (const row of hit) rows.splice(rows.indexOf(row), 1);
         return hit.map(row => ({ id: row.id }));
       };
@@ -111,11 +111,78 @@ test('id를 보내면 그 UUID로 만들고 중복은 409, 잘못된 입력은 4
   assert.equal((await call('GET', { auth: 'Bearer token-a', id: 'not-a-uuid' })).code, 400);
 });
 
-test('아직 소유자 검사가 없어 B가 A의 메모를 고칠 수 있다(4단계 과제), 목록은 본인 것만', async () => {
-  const { call } = setup();
+test('B는 A의 메모를 읽거나 고치거나 지울 수 없고 A의 메모는 그대로다', async () => {
+  const { call, rows } = setup();
   const { json: { id } } = await call('POST', { auth: 'Bearer token-a', body: { title: 'A', body: 'a' } });
+  const before = JSON.stringify(rows);
   assert.deepEqual((await call('GET', { auth: 'Bearer token-b' })).json, []);
-  assert.equal((await call('PUT', { auth: 'Bearer token-b', id, body: { title: 'B', body: 'b' } })).code, 200);
+  for (const [method, body] of [['GET'], ['PUT', { title: 'B', body: 'b' }], ['DELETE']]) {
+    const result = await call(method, { auth: 'Bearer token-b', id, body });
+    assert.equal(result.code, 404);
+    assert.deepEqual(result.json, { error: 'NOT_FOUND' });
+  }
+  assert.equal(JSON.stringify(rows), before);
+  // 같은 요청이 없는 id와 구별되지 않아 남의 메모의 존재를 알려 주지 않는다.
+  assert.deepEqual((await call('GET', { auth: 'Bearer token-b', id: '55555555-5555-4555-8555-555555555555' })).json,
+    (await call('GET', { auth: 'Bearer token-b', id })).json);
+});
+
+test('A와 B는 각자 자기 메모를 읽고 추가하고 고치고 지운다', async () => {
+  const { call, rows } = setup();
+  const a = (await call('POST', { auth: 'Bearer token-a', body: { id: '66666666-6666-4666-8666-666666666666', title: 'A', body: 'a' } })).json.id;
+  const b = (await call('POST', { auth: 'Bearer token-b', body: { id: '77777777-7777-4777-8777-777777777777', title: 'B', body: 'b' } })).json.id;
+  assert.deepEqual(rows.map(row => row.owner_id), [A, B]);
+  assert.deepEqual((await call('GET', { auth: 'Bearer token-a', id: a })).json, { id: a, title: 'A', body: 'a' });
+  assert.deepEqual((await call('GET', { auth: 'Bearer token-b', id: b })).json, { id: b, title: 'B', body: 'b' });
+  assert.equal((await call('PUT', { auth: 'Bearer token-b', id: b, body: { title: 'B2', body: 'b2' } })).code, 200);
+  assert.deepEqual((await call('GET', { auth: 'Bearer token-b' })).json, [{ id: b, title: 'B2', body: 'b2' }]);
+  assert.equal((await call('DELETE', { auth: 'Bearer token-a', id: a })).code, 204);
+  assert.equal((await call('DELETE', { auth: 'Bearer token-b', id: b })).code, 204);
+  assert.equal(rows.length, 0);
+});
+
+test('수정으로 소유자를 바꿀 수 없다: 본문의 owner_id·userId는 무시된다', async () => {
+  const { call, rows } = setup();
+  const { json: { id } } = await call('POST', { auth: 'Bearer token-a', body: { title: 'A', body: 'a' } });
+  const sent = { title: 'A2', body: 'a2', owner_id: B, userId: B };
+  assert.equal((await call('PUT', { auth: 'Bearer token-a', id, body: sent })).code, 200);
+  assert.equal(rows[0].owner_id, A);
+  assert.equal(rows[0].title, 'A2');
+  // 소유자가 바뀐 뒤에는 A도 접근할 수 없다(B가 자기 메모를 A 명의로 되돌릴 방법도 없다).
+  rows[0].owner_id = B;
+  assert.equal((await call('PUT', { auth: 'Bearer token-a', id, body: { title: 'x', body: 'y' } })).code, 404);
+  assert.equal(rows[0].title, 'A2');
+});
+
+test('주인이 없는 메모는 누구도 읽거나 고치거나 지울 수 없다', async () => {
+  const { call, rows } = setup();
+  const id = '88888888-8888-4888-8888-888888888888';
+  rows.push({ id, title: '주인 없음', content: 'c', owner_id: null });
+  for (const [method, body] of [['GET'], ['PUT', { title: 't', body: 'b' }], ['DELETE']]) {
+    assert.equal((await call(method, { auth: 'Bearer token-a', id, body })).code, 404);
+  }
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].owner_id, null);
+});
+
+test('확인과 쓰기 사이에 소유자가 바뀌어도 남의 행은 고치거나 지우지 않는다', async () => {
+  const rows = [{ id: '99999999-9999-4999-8999-999999999999', title: 'A', content: 'a', owner_id: A }];
+  const db = fakeDb(rows);
+  // 읽기 확인은 A 소유로 보이게 하고, 쓰기 직전에 B 소유로 바꾼다.
+  const racing = { from: () => { const builder = db.from(); const originalUpdate = builder.update; const originalDelete = builder.delete;
+    builder.update = value => { rows[0].owner_id = B; return originalUpdate(value); };
+    builder.delete = () => { rows[0].owner_id = B; return originalDelete(); };
+    return builder; } };
+  let first = true;
+  const handler = createNotesHandler({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: { from: () => (first ? (first = false, db.from()) : racing.from()) } }) });
+  const send = method => new Promise(resolve => handler({ method, query: { id: rows[0].id }, headers: { authorization: 'Bearer token-a' }, body: { title: 'x', body: 'y' } },
+    { setHeader() {}, status: code => ({ json: () => resolve(code), end: () => resolve(code) }) }));
+  assert.equal(await send('PUT'), 404);
+  assert.equal(rows[0].title, 'A');
+  rows[0].owner_id = A;
+  first = true;
+  assert.equal(await send('DELETE'), 404);
+  assert.equal(rows.length, 1);
 });
 
 test('허용하지 않는 메서드는 405, 설정이 없으면 503', async () => {
