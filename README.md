@@ -26,6 +26,8 @@
 
 ## 2단계: 가상 메모를 코드 밖으로 옮긴 뒤 확인하는 절차
 
+> 이 절부터 '2단계 제작 2', '2단계 보완'까지는 2단계 시점의 기록입니다. 3단계에서 `/api/notes`가 로그인 필요로 바뀌었으니 현재 상태는 맨 아래 '3단계 저장점'을 보세요.
+
 가상 메모는 학습용 Supabase 테이블(`public.notes`, RLS 켬, anon·authenticated 읽기 권한 없음)로 옮깁니다. 테이블을 만드는 `supabase/schema.sql`에는 메모 문장이 들어 있어서 `.gitignore`로 Git에서 제외했고, SQL Editor에 직접 붙여넣어 실행합니다. 공개 `data.json`과 `public/data.json`은 `notes: []`만 남깁니다. 키·비밀번호는 이 저장소에 넣지 않습니다.
 
 ### 검색 확인 (둘 다 하고 결과를 각각 기록)
@@ -72,3 +74,22 @@
 - 1단계 시작 틀의 확인 표시 `SAMPLE_NOTE_1`은 1단계 공개 자료에만 둡니다. `data.json`과 `aleph.config.json`에서 `sampleMarker`를 지웠고, `step`이 2면 `/aleph.json`에도 싣지 않습니다(`scripts/deployment-identity.mjs`는 1단계에서만 싣습니다).
 - `src/attack-check.mjs`는 배포 주소의 `/data.json`에 메모가 없는지, `/data.json`과 `/aleph.json`에 시작 틀 확인 표시가 없는지를 직접 요청해 기록합니다. 심판의 판정이 아니라 자기 점검입니다.
 - 확인: `curl -s https://<본인 배포 주소>/data.json`은 `{ "notes": [] }`만 보이고, `/aleph.json`에는 `sampleMarker`가 없어야 합니다.
+
+## 3단계 저장점: 지금 작동하는 기능과 다시 실행하는 방법
+
+- 작동하는 것(코드 시험 기준): `/` 화면의 이메일·비밀번호 로그인·로그아웃(Supabase Auth 공식 SDK, 실패 이유 표시)과, 로그인한 사용자의 가상 메모 추가·수정·삭제 화면. 화면 코드에는 공개용 Project URL과 publishable key만 들어 있습니다.
+- 서버 API: `GET·POST /api/notes`, `GET·PUT·DELETE /api/notes/:id`(`vercel.json`이 `/:id`를 `?id=`로 넘김). 처리는 `src/notes-handler.mjs`이고, 요청의 `Authorization: Bearer` 토큰을 틀의 `src/verify-login.mjs`로 검사합니다. 토큰이 없거나 검사에 실패하면 자료 없이 `401`입니다. 추가할 때는 서버가 확인한 사용자 ID만 `owner_id`로 저장하고, 본문의 `userId`·`owner_id`·`role`은 읽지 않습니다. 목록 GET은 `owner_id`가 본인인 메모만 돌려줍니다.
+- 설정: `aleph.config.json`의 `step`은 3이고, `identityProvider`(발급자·대상·공개키 주소, 비밀 키 없음)와 `allowedRoutes`(위 다섯 경로)를 적었습니다. `judgeIssuer`와 `repoUrl`, `publicAppUrl`은 바꾸지 않았습니다.
+- 다시 실행: `npm run build -- --local`로 화면 자료를 만들고, `npm run test:r5`, `npm run test:package`, `node --test test/notes-api.test.mjs`로 시험합니다(가짜 DB·가짜 로그인 검사기 사용, 실제 Supabase·배포 확인이 아님). 배포 화면에는 Vercel 환경변수 `SUPABASE_URL`, `SUPABASE_SECRET_KEY`를 학생이 직접 넣고 Redeploy해야 합니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`, `artifacts/`는 Git에 올리지 않음).
+- 확인(배포 주소에서): 토큰 없는 `curl -s -o /dev/null -w "%{http_code}\n" https://<배포 주소>/api/notes`는 `401`이어야 합니다. A 계정으로 로그인하면 메모를 추가·수정·삭제할 수 있고, 로그아웃하면 목록이 사라져야 합니다.
+- `src/attack-check.mjs`: 3단계에서는 토큰 없는 GET·POST·PUT·DELETE와 서명 없는 위조 토큰 요청의 상태 코드만 기록합니다(실제로 보낸 요청의 결과이며 심판의 판정이 아님). 정상 A 로그인 뒤 동작은 이 점검이 보내지 않아 `미실행`으로 남깁니다.
+- `src/decider.mjs`의 `RULE_IDS`는 시작 틀의 `starter.deny`뿐이며, 판정 규칙은 6단계부터 구현합니다.
+
+### 3단계의 남은 약점
+
+- **소유자 검사 없음(4단계 과제)**: B가 A의 메모 id를 알면 `GET·PUT·DELETE /api/notes/:id`로 접근할 수 있습니다. 목록만 본인 메모로 좁혀 있습니다. 이 접근을 확인한 기록은 아직 없습니다.
+- 처음 넣은 가상 메모 네 건은 `owner_id`가 비어 있을 수 있어 목록에 나오지 않을 수 있습니다.
+- `notes.id` 칸이 UUID 타입인지는 이 저장소에서 확인하지 못했습니다(`supabase/schema.sql`은 Git 제외). UUID가 아니면 추가가 `502`로 실패합니다.
+- `/api/ai`와 `/api/threat-intel`은 여전히 인증 없이 `501`만 돌려주는 빈 틀입니다.
+- `allowedRoutes`는 `"METHOD /경로"` 문자열로 적었습니다. 문서에 정해진 형식이 없어 운영 측 양식과 다를 수 있습니다.
+- 이 저장소에서는 실제 Supabase 연결·배포 화면·정상 A 로그인 동작을 시험하지 못했습니다. 학생이 확인해야 합니다. 배포 주소는 `main`에 합치기 전이면 이전 코드일 수 있습니다.
