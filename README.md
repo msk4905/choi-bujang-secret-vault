@@ -8,7 +8,7 @@
 2. 방어전 1단계 카드의 **Deploy** 버튼을 누릅니다. Vercel에 GitHub로 로그인하고, 새 저장소가 **본인 계정의 Public 저장소**인지 확인한 뒤 Deploy를 누릅니다.
 3. 배포가 끝나면 화면에 나온 `https://…vercel.app` 주소를 방어전 1단계 카드에 붙여넣고 제출합니다. 저장소 주소나 설정 파일은 적지 않습니다.
 
-배포가 끝나면 `/`에서 점령된 가상 자료실을 볼 수 있습니다. `/data.json`에는 같은 가상 메모가 공개됩니다. 이 공개 상태를 확인하는 것이 1단계의 출발점입니다. 1단계 접수와 심판 판정은 포털에서 확인합니다.
+배포가 끝나면 `/`에서 점령된 가상 자료실을 볼 수 있습니다. 1단계 시작 틀에서는 `/data.json`에 같은 가상 메모가 공개됩니다. 이 공개 상태를 확인하는 것이 1단계의 출발점이었고, 2단계부터는 메모를 `/data.json`에서 뺐습니다. 1단계 접수와 심판 판정은 포털에서 확인합니다.
 
 ## 시작 틀의 자동 처리
 
@@ -48,13 +48,13 @@
 - 자료를 읽는 서버 함수 `/api/notes`가 있지만 로그인이 없어 **누구나 부를 수 있습니다**. 그래서 이 함수가 돌려주는 자료는 가상 메모뿐이어야 합니다. 보호는 3단계 이후에 구현합니다.
 - `owner_id`는 칸만 있고 `auth.users` 외래키도 없으며, 소유자별 읽기·쓰기 정책도 없습니다. 3단계 로그인 뒤에 만들 일입니다.
 - `/api/ai`와 `/api/threat-intel`은 인증 없이 호출되며 `501`만 돌려주는 빈 틀입니다. 실제 기능은 구현되지 않았습니다.
-- `aleph.config.json`의 `step`은 아직 1이고, `scripts/build-public.mjs`도 1단계 복사 흐름 그대로입니다. 2단계 이후 흐름으로의 전환은 하지 않았습니다.
+- `aleph.config.json`의 `step`은 2입니다(2단계 보완에서 올림). 빌드는 1~2단계 흐름이라, 3단계로 올릴 때는 `scripts/build-public.mjs`와 `scripts/deployment-identity.mjs`를 해당 단계에 맞게 바꿔야 합니다.
 - Supabase 쪽 설정(RLS 켬, 권한 회수)은 SQL Editor에서 학생이 실행해 확인해야 하며, 이 저장소에서는 실행해 보지 않았습니다.
 
 ## 2단계 저장점: 지금 작동하는 기능과 다시 실행하는 방법
 
 - 작동하는 것: `/` 화면(서버 함수 `/api/notes`로 Supabase의 가상 메모 네 건을 읽음)과 정적 `/data.json`(`notes`는 빈 배열), `npm run build`(`--local`은 로컬 확인용), 학습용 Supabase 테이블 스키마 파일(`supabase/schema.sql`, Git 제외).
-- 아직 아닌 것: 로그인으로 보호되는 자료 API, 소유자별 정책, `/api/ai`·`/api/threat-intel` 구현. `aleph.config.json`의 `step`은 1이며 빌드가 1단계 흐름이라 2단계 값으로 올리지 않았습니다.
+- 아직 아닌 것: 로그인으로 보호되는 자료 API, 소유자별 정책, `/api/ai`·`/api/threat-intel` 구현. `aleph.config.json`의 `step`은 2이고(2단계 보완), 빌드는 1~2단계 흐름입니다.
 - 다시 실행: `npm run build -- --local`로 화면 자료를 만들고, SQL Editor에서 `supabase/schema.sql`을 실행합니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다. 이때 `aleph.config.json`의 `publicAppUrl`에 본인의 실제 `https://…vercel.app` 주소가 필요합니다.
 - `src/attack-check.mjs`는 실제로 보낸 요청의 결과만 기록하는 자기 점검이며 심판의 판정이 아닙니다. 아직 실행하지 않았습니다.
 - `src/decider.mjs`의 `RULE_IDS`는 시작 틀의 `starter.deny`뿐이며, 판정 규칙은 6단계부터 구현합니다.
@@ -66,3 +66,9 @@
 - **남은 약점**: `/api/notes`는 로그인 없이 누구나 부를 수 있는 공개 주소입니다. 접근 제한이 없고 호출 횟수 제한도 없습니다. 3단계 전까지는 가상 메모만 두세요.
 - 확인: 화면에는 네 카드가 보이고, `/data.json`에는 메모가 없어야 합니다. 환경변수를 넣지 않으면 `/api/notes`는 `503 NOTES_NOT_CONFIGURED`를 돌려주며 화면에는 오류 문구가 보입니다.
 - 이 저장소에서는 가짜 로컬 서버로만 함수의 동작을 시험했습니다. 실제 Supabase 연결과 배포 화면은 학생이 확인해야 합니다.
+
+### 2단계 보완: 정적 응답에서 시작 틀 확인 표시 빼기
+
+- 1단계 시작 틀의 확인 표시 `SAMPLE_NOTE_1`은 1단계 공개 자료에만 둡니다. `data.json`과 `aleph.config.json`에서 `sampleMarker`를 지웠고, `step`이 2면 `/aleph.json`에도 싣지 않습니다(`scripts/deployment-identity.mjs`는 1단계에서만 싣습니다).
+- `src/attack-check.mjs`는 배포 주소의 `/data.json`에 메모가 없는지, `/data.json`과 `/aleph.json`에 시작 틀 확인 표시가 없는지를 직접 요청해 기록합니다. 심판의 판정이 아니라 자기 점검입니다.
+- 확인: `curl -s https://<본인 배포 주소>/data.json`은 `{ "notes": [] }`만 보이고, `/aleph.json`에는 `sampleMarker`가 없어야 합니다.
