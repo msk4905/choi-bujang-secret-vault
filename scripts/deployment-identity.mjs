@@ -28,5 +28,10 @@ export function deploymentIdentity(env, config) {
   };
   // 시작 틀 확인 표시는 1단계 공개 자료에만 둔다. 2단계 이후 정적 응답에 내보내지 않는다.
   if (config.step === 1) identity.sampleMarker = config.sampleMarker;
+  // 3단계부터는 허용 경로를 공개 확인 파일에도 싣는다(경로 문자열뿐, 비밀값 없음).
+  if (config.step >= 3 && Array.isArray(config.allowedRoutes) && config.allowedRoutes.length
+      && config.allowedRoutes.every(route => typeof route === 'string')) {
+    identity.allowedRoutes = [...config.allowedRoutes];
+  }
   return identity;
 }

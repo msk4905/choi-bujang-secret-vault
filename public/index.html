@@ -68,9 +68,8 @@
     <ul id="notes" aria-live="polite"><li>가상 자료를 불러오는 중입니다.</li></ul>
   </main>
   <script type="module">
-    // 공개용 값입니다(Project URL, publishable key). secret/service_role 키는 넣지 않습니다.
-    const SUPABASE_URL = 'https://cpdddhkjmfmwzsoxiokq.supabase.co';
-    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_p01y6D6ccMtOUuad_LH_AQ_0dSIqc9M';
+    // 로그인용 공개 설정(Project URL, publishable key)은 화면 코드에 적지 않고 서버 함수 /api/config에서 받습니다.
+    // secret/service_role 키는 어디에도 넣지 않습니다.
 
     const stateText = document.querySelector('#auth-state');
     const form = document.querySelector('#login-form');
@@ -95,11 +94,14 @@
     // SDK를 못 불러와도(오프라인·차단) 화면이 멈추지 않도록 따로 감쌉니다.
     let supabase = null;
     try {
+      const configResponse = await fetch('/api/config', { headers: { Accept: 'application/json' } });
+      if (!configResponse.ok) throw new Error('config');
+      const { supabaseUrl, publishableKey } = await configResponse.json();
       const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm');
-      supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+      supabase = createClient(supabaseUrl, publishableKey);
     } catch {
       stateText.textContent = '로그인 모듈을 불러오지 못했습니다.';
-      errorText.textContent = '로그인 SDK(cdn.jsdelivr.net)를 읽지 못했습니다. 인터넷 연결이나 차단 설정을 확인하고 새로고침하세요.';
+      errorText.textContent = '로그인 설정(/api/config)이나 로그인 SDK(cdn.jsdelivr.net)를 읽지 못했습니다. 인터넷 연결·차단 설정·Vercel 환경변수를 확인하고 새로고침하세요.';
     }
 
     function showSession(session) {
