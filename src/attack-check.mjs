@@ -3,7 +3,7 @@
 const STARTER_MARKER = 'SAMPLE_NOTE_1';
 
 export async function runAttackChecks(config) {
-  if (![2, 3, 4].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![2, 3, 4, 5].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -52,6 +52,7 @@ export async function runAttackChecks(config) {
     { attackId: 'static_marker_absent', expected: '정적 응답에 시작 틀 확인 표시가 보이지 않음', observed: markerObserved },
   ];
   if (config.step >= 3) attempts.push(...await apiChecks(app, config));
+  if (typeof config.originalApiUrl === 'string') attempts.push(await originalApiCheck(app, config));
   return attempts;
 }
 
@@ -110,4 +111,46 @@ async function apiChecks(app, config) {
     { attackId: 'normal_login_crud', expected: 'A 계정 로그인 뒤 메모 추가·수정·삭제가 되고 로그아웃 뒤에는 자료가 사라짐',
       observed: '미실행: 이 점검은 로그인 계정을 쓰지 않음. 학생이 화면에서 직접 확인해야 함' },
   ];
+}
+
+// 5단계: 원본 자료 주소를 공개 키만으로 직접 불러 본다. 공개 키는 배포 주소의 /api/config에서 받아 쓰고,
+// 키 값과 응답 본문은 기록하지 않는다. 기록하는 것은 상태 코드뿐이며 심판의 판정이 아니다.
+async function originalApiCheck(app, config) {
+  const expected = '공개 키만으로 원본 자료 주소를 직접 불러도 메모가 나오지 않음(401·403 등 거부)';
+  let key = null;
+  try {
+    const response = await fetch(new URL('/api/config', app), { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    if (response.ok) key = (await response.json())?.publishableKey ?? null;
+  } catch {
+    key = null;
+  }
+  if (typeof key !== 'string' || !key) {
+    return { attackId: 'original_api_direct', expected, observed: '미실행: 배포 주소의 /api/config에서 공개 키를 받지 못해 직접 요청을 보내지 않음' };
+  }
+  let status = null;
+  let leaked = false;
+  try {
+    const response = await fetch(config.originalApiUrl, {
+      redirect: 'error', signal: AbortSignal.timeout(10000),
+      headers: { apikey: key },
+    });
+    status = response.status;
+    const text = await response.text().catch(() => '');
+    try {
+      const parsed = JSON.parse(text);
+      leaked = response.ok && Array.isArray(parsed) && parsed.length > 0;
+    } catch {
+      leaked = false;
+    }
+  } catch {
+    status = null;
+  }
+  const observed = status === null
+    ? '원본 자료 주소로 요청을 보내지 못함(네트워크 오류), 거부 여부를 확인하지 못함'
+    : leaked
+      ? `원본 자료 주소가 HTTP ${status}로 응답하며 메모 행이 보임`
+      : status >= 200 && status < 300
+        ? `원본 자료 주소가 HTTP ${status}로 응답함(메모 행은 보이지 않음), 권한 회수 여부는 따로 확인 필요`
+        : `원본 자료 주소가 HTTP ${status}로 거부됨`;
+  return { attackId: 'original_api_direct', expected, observed };
 }

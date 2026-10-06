@@ -114,3 +114,24 @@
 - 남의 메모와 없는 메모를 같은 `404`로 답하므로 응답으로는 존재 여부를 알 수 없지만, 요청 횟수 제한은 없습니다.
 - `/api/ai`와 `/api/threat-intel`은 여전히 인증 없이 `501`만 돌려주는 빈 틀입니다.
 - `allowedRoutes`는 `"METHOD /경로"` 문자열이며 운영 측 양식과 다를 수 있습니다.
+
+## 5단계 저장점: 지금 작동하는 기능과 다시 실행하는 방법
+
+> 3단계 저장점의 "화면 코드에는 공개용 Project URL과 publishable key만 들어 있습니다"는 3단계 시점의 기록입니다. 5단계에서 화면 코드의 키 글자를 뺐습니다.
+
+- 작동하는 것(코드 시험 기준): 브라우저는 메모 자료를 Supabase에서 직접 읽거나 고치지 않고, 모든 자료 요청을 서버 함수 `/api/notes`(`/:id`)로 보냅니다. 브라우저의 Supabase 호출은 로그인(`signInWithPassword`·`signOut`·`getSession`·`onAuthStateChange`)뿐입니다.
+- 로그인용 공개 설정: `public/index.html`에는 publishable key를 적지 않고, `GET /api/config`(`vercel.json`이 `/api/notes?config=1`로 넘김)에서 Project URL과 publishable key만 받습니다. 새 서버 함수 파일은 만들지 않아 `package/baseline-functions.json`은 그대로입니다. 값은 Vercel 환경변수 `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`에서만 읽으며, 없으면 `503 CONFIG_NOT_CONFIGURED`입니다. `SUPABASE_PUBLISHABLE_KEY`는 학생이 Vercel 환경변수에 직접 넣고 Redeploy해야 합니다.
+- 설정: `aleph.config.json`의 `step`은 5이고 `allowedRoutes`에 `GET /api/config`를 더한 여섯 경로가 있으며, 3단계부터 `/aleph.json`에도 실립니다. `originalApiUrl`은 `https://cpdddhkjmfmwzsoxiokq.supabase.co/rest/v1/notes`입니다(쿼리 없음, 실제로 요청해 확인하지 못함). `restoreRoute`는 비어 있습니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`은 바꾸지 않았습니다. 빌드는 1~5단계 흐름입니다.
+- DB 권한(학생이 SQL Editor에서 실행한 학습용 SQL, 저장소에는 SQL을 두지 않음): `public.notes`의 `public`·`anon`·`authenticated` 직접 권한을 회수했다고 학생이 알려 줬습니다. 적용 전후 권한 조회 결과는 이 저장소에서 확인하지 못했습니다.
+- 다시 실행: `npm ci` 뒤 `node --test test/*.test.mjs`(가짜 DB·가짜 로그인 검사기, 실제 Supabase·배포 확인이 아님)와 `npm run build -- --local`입니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만들며 `bundle-notes.json`·`artifacts/`는 Git에 올리지 않습니다.
+- `src/attack-check.mjs`: 4단계 점검에 `original_api_direct`(배포 주소의 `/api/config`에서 받은 공개 키로 원본 자료 주소를 직접 요청해 상태 코드만 기록)를 더했습니다. 실제로 보낸 요청의 결과만 기록하며 심판의 판정이 아닙니다. 실행하지 못한 점검은 `미실행`으로 남습니다.
+- `src/decider.mjs`의 `RULE_IDS`는 시작 틀의 `starter.deny`뿐이며, 판정 규칙은 6단계부터 구현합니다.
+- 확인(학생이 배포 주소에서): ① A 로그인 뒤 메모 추가·수정·삭제 ② 토큰 없는 `GET /api/notes`는 `401` ③ B 토큰으로 A의 메모 id 요청은 `404` ④ 공개 키(`apikey` 헤더)만으로 원본 자료 주소를 요청하면 `401`·`403`이고 `200`이면 실패. ①~④는 아직 하지 않았습니다.
+
+### 5단계의 남은 약점
+
+- 위 ①~④ 실제 배포 확인 기록이 없습니다.
+- `/api/config`는 로그인 전에 누구나 부를 수 있고 공개용 값만 돌려줍니다. 호출 횟수 제한은 없습니다.
+- 서버 전용 키로 접속하는 서버 함수는 RLS와 테이블 권한을 거치지 않으므로, 접근 구분은 소유자 검사가 맡습니다.
+- `owner_id`에는 `auth.users` 외래키가 없고, `/api/ai`·`/api/threat-intel`은 `501`만 돌려주는 빈 틀입니다.
+- `allowedRoutes`는 `"METHOD /경로"` 문자열이며 운영 측 양식과 다를 수 있습니다.
