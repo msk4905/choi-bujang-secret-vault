@@ -45,7 +45,7 @@
 ### 공개 API의 남은 약점 (현재 확인된 것만 기록)
 
 - `/data.json`은 여전히 로그인 없이 누구나 읽을 수 있는 정적 파일입니다. 지금은 메모가 비어 있어 가상 메모는 나오지 않지만, 읽기 보호가 구현된 것은 아닙니다.
-- 보호된 자료 API는 아직 없습니다. 화면(`public/index.html`)은 여전히 공개 `/data.json`을 읽으므로, Supabase의 메모를 보여 주는 경로는 아직 연결되지 않았습니다.
+- 자료를 읽는 서버 함수 `/api/notes`가 있지만 로그인이 없어 **누구나 부를 수 있습니다**. 그래서 이 함수가 돌려주는 자료는 가상 메모뿐이어야 합니다. 보호는 3단계 이후에 구현합니다.
 - `owner_id`는 칸만 있고 `auth.users` 외래키도 없으며, 소유자별 읽기·쓰기 정책도 없습니다. 3단계 로그인 뒤에 만들 일입니다.
 - `/api/ai`와 `/api/threat-intel`은 인증 없이 호출되며 `501`만 돌려주는 빈 틀입니다. 실제 기능은 구현되지 않았습니다.
 - `aleph.config.json`의 `step`은 아직 1이고, `scripts/build-public.mjs`도 1단계 복사 흐름 그대로입니다. 2단계 이후 흐름으로의 전환은 하지 않았습니다.
@@ -53,8 +53,16 @@
 
 ## 2단계 저장점: 지금 작동하는 기능과 다시 실행하는 방법
 
-- 작동하는 것: `/` 화면과 정적 `/data.json`(`notes`는 빈 배열), `npm run build`(`--local`은 로컬 확인용), 학습용 Supabase 테이블 스키마 파일(`supabase/schema.sql`, Git 제외).
-- 아직 아닌 것: 보호된 자료 API, 로그인, 소유자별 정책, `/api/ai`·`/api/threat-intel` 구현. `aleph.config.json`의 `step`은 1이며 빌드가 1단계 흐름이라 2단계 값으로 올리지 않았습니다.
+- 작동하는 것: `/` 화면(서버 함수 `/api/notes`로 Supabase의 가상 메모 네 건을 읽음)과 정적 `/data.json`(`notes`는 빈 배열), `npm run build`(`--local`은 로컬 확인용), 학습용 Supabase 테이블 스키마 파일(`supabase/schema.sql`, Git 제외).
+- 아직 아닌 것: 로그인으로 보호되는 자료 API, 소유자별 정책, `/api/ai`·`/api/threat-intel` 구현. `aleph.config.json`의 `step`은 1이며 빌드가 1단계 흐름이라 2단계 값으로 올리지 않았습니다.
 - 다시 실행: `npm run build -- --local`로 화면 자료를 만들고, SQL Editor에서 `supabase/schema.sql`을 실행합니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다. 이때 `aleph.config.json`의 `publicAppUrl`에 본인의 실제 `https://…vercel.app` 주소가 필요합니다.
 - `src/attack-check.mjs`는 실제로 보낸 요청의 결과만 기록하는 자기 점검이며 심판의 판정이 아닙니다. 아직 실행하지 않았습니다.
 - `src/decider.mjs`의 `RULE_IDS`는 시작 틀의 `starter.deny`뿐이며, 판정 규칙은 6단계부터 구현합니다.
+
+### 2단계 제작 2: 서버 함수로 자료 읽기
+
+- `api/notes.js`는 `SUPABASE_URL`과 서버 전용 `SUPABASE_SECRET_KEY`를 Vercel 환경변수에서만 읽고, 제목과 내용만 `{ "notes": [...] }`로 돌려줍니다(`owner_id`는 싣지 않음). 키 값은 응답·로그·브라우저 파일에 넣지 않으며, 오류 응답에는 일반 오류 이름만 담습니다. 화면(`public/index.html`)은 이 함수에서 메모를 받아 카드로 보여 줍니다.
+- 환경변수는 학생이 Vercel 프로젝트의 **Settings → Environment Variables**에서 직접 만듭니다(값은 코드·Git·대화에 적지 않음). 저장한 뒤 **Deployments → 최신 배포 → Redeploy**를 눌러야 반영됩니다.
+- **남은 약점**: `/api/notes`는 로그인 없이 누구나 부를 수 있는 공개 주소입니다. 접근 제한이 없고 호출 횟수 제한도 없습니다. 3단계 전까지는 가상 메모만 두세요.
+- 확인: 화면에는 네 카드가 보이고, `/data.json`에는 메모가 없어야 합니다. 환경변수를 넣지 않으면 `/api/notes`는 `503 NOTES_NOT_CONFIGURED`를 돌려주며 화면에는 오류 문구가 보입니다.
+- 이 저장소에서는 가짜 로컬 서버로만 함수의 동작을 시험했습니다. 실제 Supabase 연결과 배포 화면은 학생이 확인해야 합니다.
