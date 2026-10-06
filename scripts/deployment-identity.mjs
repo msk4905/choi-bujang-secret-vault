@@ -40,5 +40,18 @@ export function deploymentIdentity(env, config) {
     if (original && original.protocol === 'https:' && !original.username && !original.password
         && !original.search && !original.hash) identity.originalApiUrl = original.href;
   }
+  // 5단계부터는 쿼리 없는 원본 자료 HTTPS 경로를 공개 확인 파일에도 싣는다(주소뿐, 비밀값 없음).
+  if (config.step >= 5 && typeof config.originalApiUrl === 'string') {
+    let original;
+    try {
+      original = new URL(config.originalApiUrl);
+    } catch {
+      original = null;
+    }
+    if (original && original.protocol === 'https:' && !original.username && !original.password
+        && !original.search && !original.hash) {
+      identity.originalApiUrl = config.originalApiUrl;
+    }
+  }
   return identity;
 }
