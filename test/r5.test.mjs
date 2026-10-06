@@ -31,7 +31,10 @@ test('build identity uses Vercel Git and deployment metadata', () => {
   assert.equal(second.step, 2);
   assert.equal('sampleMarker' in second, false);
   assert.equal(JSON.stringify(second).includes('SAMPLE_NOTE_1'), false);
-  assert.throws(() => deploymentIdentity(env, { ...config, step: 3 }));
+  const third = deploymentIdentity(env, { ...config, step: 3 });
+  assert.equal(third.step, 3);
+  assert.equal('sampleMarker' in third, false);
+  assert.throws(() => deploymentIdentity(env, { ...config, step: 4 }));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_PROVIDER: undefined }, config));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_COMMIT_SHA: 'short' }, config));
 });
@@ -86,4 +89,45 @@ test('attack check treats a missing data.json as no memos and bad JSON as unknow
     const [notes] = await runAttackChecks(config);
     assert.match(notes.observed, /형식을 확인할 수 없음/u);
   });
+});
+
+test('3단계 점검은 토큰 없는 요청과 위조 토큰의 거부 여부를 상태 코드로만 기록한다', async () => {
+  const step3 = { ...config, step: 3, identityProvider: { issuer: 'https://p.supabase.co/auth/v1', audience: 'authenticated' } };
+  const sent = [];
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const respond of [() => new Response('{"error":"UNAUTHENTICATED"}', { status: 401 }),
+      () => new Response('[{"title":"비밀"}]', { status: 200 })]) {
+      sent.length = 0;
+      globalThis.fetch = async (url, init) => {
+        const { pathname } = new URL(String(url));
+        sent.push({ method: init?.method ?? 'GET', pathname, auth: init?.headers?.Authorization });
+        if (pathname === '/data.json') return json({ notes: [] });
+        if (pathname === '/aleph.json') return json({ step: 3 });
+        return respond();
+      };
+      const attempts = await runAttackChecks(step3);
+      const api = attempts.filter(item => /^(anonymous_api|forged)/u.test(item.attackId));
+      assert.equal(api.length, 5);
+      const rejected = respond().status === 401;
+      assert.ok(api.every(item => item.observed.includes(rejected ? '401로 거부됨' : 'HTTP 200로 응답해')));
+      assert.equal(attempts.at(-1).attackId, 'normal_login_crud');
+      assert.match(attempts.at(-1).observed, /^미실행/u);
+      assert.deepEqual(sent.filter(item => item.pathname.startsWith('/api')).map(item => item.method),
+        ['GET', 'POST', 'PUT', 'DELETE', 'GET']);
+      assert.ok(sent.filter(item => item.auth).length === 1);
+      assert.equal(JSON.stringify(attempts).includes('비밀'), false);
+      assert.equal(JSON.stringify(attempts).includes('eyJ'), false);
+    }
+    globalThis.fetch = async (url) => {
+      const { pathname } = new URL(String(url));
+      if (pathname === '/data.json') return json({ notes: [] });
+      if (pathname === '/aleph.json') return json({ step: 3 });
+      throw new Error('offline');
+    };
+    const offline = await runAttackChecks(step3);
+    assert.match(offline.find(item => item.attackId === 'anonymous_api_list').observed, /요청을 보내지 못함/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
