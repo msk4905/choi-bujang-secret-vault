@@ -46,12 +46,9 @@
     <ul id="notes" aria-live="polite"><li>가상 자료를 불러오는 중입니다.</li></ul>
   </main>
   <script type="module">
-    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm';
-
     // 공개용 값입니다(Project URL, publishable key). secret/service_role 키는 넣지 않습니다.
     const SUPABASE_URL = 'https://cpdddhkjmfmwzsoxiokq.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_p01y6D6ccMtOUuad_LH_AQ_0dSIqc9M';
-    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
     const stateText = document.querySelector('#auth-state');
     const form = document.querySelector('#login-form');
@@ -60,6 +57,16 @@
     const loginButton = document.querySelector('#login-button');
     const logoutButton = document.querySelector('#logout-button');
     const errorText = document.querySelector('#auth-error');
+
+    // SDK를 못 불러와도(오프라인·차단) 아래 메모 화면이 멈추지 않도록 따로 감쌉니다.
+    let supabase = null;
+    try {
+      const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm');
+      supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+    } catch {
+      stateText.textContent = '로그인 모듈을 불러오지 못했습니다.';
+      errorText.textContent = '로그인 SDK(cdn.jsdelivr.net)를 읽지 못했습니다. 인터넷 연결이나 차단 설정을 확인하고 새로고침하세요.';
+    }
 
     function showSession(session) {
       const user = session?.user;
@@ -72,6 +79,7 @@
 
     form.addEventListener('submit', async event => {
       event.preventDefault();
+      if (!supabase) return;
       errorText.textContent = '';
       loginButton.disabled = true;
       try {
@@ -89,6 +97,7 @@
     });
 
     logoutButton.addEventListener('click', async () => {
+      if (!supabase) return;
       errorText.textContent = '';
       logoutButton.disabled = true;
       try {
@@ -101,12 +110,14 @@
       }
     });
 
-    supabase.auth.onAuthStateChange((_event, session) => showSession(session));
-    try {
-      const { data } = await supabase.auth.getSession();
-      showSession(data.session);
-    } catch {
-      showSession(null);
+    if (supabase) {
+      supabase.auth.onAuthStateChange((_event, session) => showSession(session));
+      try {
+        const { data } = await supabase.auth.getSession();
+        showSession(data.session);
+      } catch {
+        showSession(null);
+      }
     }
 
     const list = document.querySelector('#notes');
