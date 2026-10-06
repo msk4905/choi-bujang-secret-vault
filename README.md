@@ -93,3 +93,22 @@
 - `/api/ai`와 `/api/threat-intel`은 여전히 인증 없이 `501`만 돌려주는 빈 틀입니다.
 - `allowedRoutes`는 `"METHOD /경로"` 문자열로 적었습니다. 문서에 정해진 형식이 없어 운영 측 양식과 다를 수 있습니다.
 - 이 저장소에서는 실제 Supabase 연결·배포 화면·정상 A 로그인 동작을 시험하지 못했습니다. 학생이 확인해야 합니다. 배포 주소는 `main`에 합치기 전이면 이전 코드일 수 있습니다.
+
+## 4단계 저장점: 지금 작동하는 기능과 다시 실행하는 방법
+
+- 작동하는 것(코드 시험 기준): `GET·PUT·DELETE /api/notes/:id`가 DB의 `owner_id`와 서버가 확인한 사용자 ID를 비교해 본인 메모만 처리합니다. 남의 메모, 주인 없는 메모, 없는 메모는 모두 같은 `404 NOT_FOUND`입니다. 수정·삭제 조건에도 `owner_id`를 다시 걸고, 수정은 `owner_id`를 바꾸지 않습니다. 추가는 확인된 ID만 저장하고 목록은 본인 메모만 돌려줍니다. 한 건 응답은 `{id,title,body}`, 수정 본문은 `{title,body}`입니다. 처리는 `src/notes-handler.mjs`입니다.
+- DB 권한(학생이 SQL Editor에서 실행한 학습용 SQL, 저장소에는 SQL을 두지 않음): `public.notes`에 RLS를 켜고 `anon`·`authenticated`의 권한을 회수한 뒤 `authenticated`에만 SELECT·INSERT·UPDATE·DELETE를 부여했습니다. 정책 `notes_select_own`·`notes_insert_own`·`notes_update_own`·`notes_delete_own`은 모두 `auth.uid() = owner_id`일 때만 허용합니다. 학생이 보고한 결과는 SQL로 역할을 흉내 낸 시험(A·B 각자 자기 행만, 상대 행·소유자 변경·`anon` 읽기 거부)이 기대와 모두 일치했다는 것이며, 이 저장소에서는 실제 DB에 접속하지 않아 확인하지 못했습니다. 서버 API는 서버 전용 키로 접속하므로 RLS를 건너뛰고, API의 접근 구분은 위 소유자 검사가 맡습니다.
+- 설정: `aleph.config.json`의 `step`은 4이고 `allowedRoutes`는 실제 다섯 경로(`GET·POST /api/notes`, `GET·PUT·DELETE /api/notes/:id`) 그대로입니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`은 바꾸지 않았습니다. 빌드(`scripts/build-public.mjs`, `scripts/deployment-identity.mjs`)는 1~4단계 흐름입니다.
+- 다시 실행: `npm ci` 뒤 `node --test test/notes-api.test.mjs`(소유자 시험 포함), `npm run test:r5`, `npm run test:package`로 시험합니다(가짜 DB·가짜 로그인 검사기, 실제 Supabase·배포 확인이 아님). 화면 자료는 `npm run build -- --local`입니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만들며 `bundle-notes.json`(Git 제외)에 단계 설명이 필요합니다.
+- `src/attack-check.mjs`: 4단계에서는 3단계의 토큰 없는 요청·위조 토큰 점검에 더해 `cross_owner_access`(B 로그인으로 A의 메모 접근)를 **미실행**으로 남깁니다. A·B 로그인 계정을 쓰지 않아서 이 점검이 보내지 않기 때문입니다. 실제로 보낸 요청의 결과만 기록하며 심판의 판정이 아닙니다.
+- `src/decider.mjs`의 `RULE_IDS`는 시작 틀의 `starter.deny`뿐이며, 판정 규칙은 6단계부터 구현합니다.
+- 확인(배포 주소에서): 앱에서 A로 로그인하면 메모를 추가·수정·삭제할 수 있고, B 토큰으로 A의 메모 id를 `GET·PUT·DELETE /api/notes/<id>`로 요청하면 `404`여야 합니다. 이 확인은 아직 하지 않았습니다. 배포 주소는 `main`에 합치기 전이면 이전 코드일 수 있습니다.
+
+### 4단계의 남은 약점
+
+- 3단계의 "소유자 검사 없음"은 코드에서 고쳤습니다. 다만 실제 배포 화면에서 A·B 두 계정으로 확인한 기록은 아직 없습니다.
+- `owner_id` 칸에는 `auth.users` 외래키가 없습니다.
+- 처음 넣은 가상 메모 네 건 중 `아침 리추얼`은 `owner_id`가 비어 있어 아무도 읽지 못합니다. 학생이 일부러 주인 없이 남겼습니다.
+- 남의 메모와 없는 메모를 같은 `404`로 답하므로 응답으로는 존재 여부를 알 수 없지만, 요청 횟수 제한은 없습니다.
+- `/api/ai`와 `/api/threat-intel`은 여전히 인증 없이 `501`만 돌려주는 빈 틀입니다.
+- `allowedRoutes`는 `"METHOD /경로"` 문자열이며 운영 측 양식과 다를 수 있습니다.

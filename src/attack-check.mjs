@@ -3,7 +3,7 @@
 const STARTER_MARKER = 'SAMPLE_NOTE_1';
 
 export async function runAttackChecks(config) {
-  if (![2, 3].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![2, 3, 4].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -105,6 +105,8 @@ async function apiChecks(app, config) {
     { attackId: 'anonymous_api_update', expected: '토큰 없는 PUT /api/notes/:id가 401로 거부됨', observed: describe('토큰 없는 PUT /api/notes/:id', results.update) },
     { attackId: 'anonymous_api_delete', expected: '토큰 없는 DELETE /api/notes/:id가 401로 거부됨', observed: describe('토큰 없는 DELETE /api/notes/:id', results.remove) },
     { attackId: 'forged_token_list', expected: '서명 없는 위조 토큰의 GET /api/notes가 401로 거부됨', observed: describe('위조 토큰 GET /api/notes', results.forged) },
+    ...(config.step >= 4 ? [{ attackId: 'cross_owner_access', expected: 'B 로그인으로 A의 메모 id를 읽기·수정·삭제하면 404로 거부되고 소유자 변경도 거부됨',
+      observed: '미실행: 이 점검은 A·B 로그인 계정을 쓰지 않음. 학생이 두 계정으로 직접 확인해야 함' }] : []),
     { attackId: 'normal_login_crud', expected: 'A 계정 로그인 뒤 메모 추가·수정·삭제가 되고 로그아웃 뒤에는 자료가 사라짐',
       observed: '미실행: 이 점검은 로그인 계정을 쓰지 않음. 학생이 화면에서 직접 확인해야 함' },
   ];

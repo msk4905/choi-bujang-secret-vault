@@ -34,7 +34,10 @@ test('build identity uses Vercel Git and deployment metadata', () => {
   const third = deploymentIdentity(env, { ...config, step: 3 });
   assert.equal(third.step, 3);
   assert.equal('sampleMarker' in third, false);
-  assert.throws(() => deploymentIdentity(env, { ...config, step: 4 }));
+  const fourth = deploymentIdentity(env, { ...config, step: 4 });
+  assert.equal(fourth.step, 4);
+  assert.equal('sampleMarker' in fourth, false);
+  assert.throws(() => deploymentIdentity(env, { ...config, step: 5 }));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_PROVIDER: undefined }, config));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_COMMIT_SHA: 'short' }, config));
 });
@@ -127,6 +130,26 @@ test('3단계 점검은 토큰 없는 요청과 위조 토큰의 거부 여부�
     };
     const offline = await runAttackChecks(step3);
     assert.match(offline.find(item => item.attackId === 'anonymous_api_list').observed, /요청을 보내지 못함/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('4단계 점검은 A·B 로그인이 필요한 소유자 시험을 실행하지 않고 미실행으로 남긴다', async () => {
+  const step4 = { ...config, step: 4, identityProvider: { issuer: 'https://p.supabase.co/auth/v1', audience: 'authenticated' } };
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      const { pathname } = new URL(String(url));
+      if (pathname === '/data.json') return json({ notes: [] });
+      if (pathname === '/aleph.json') return json({ step: 4 });
+      return new Response('{"error":"UNAUTHENTICATED"}', { status: 401 });
+    };
+    const attempts = await runAttackChecks(step4);
+    const cross = attempts.find(item => item.attackId === 'cross_owner_access');
+    assert.match(cross.observed, /^미실행/u);
+    assert.equal(attempts.at(-1).attackId, 'normal_login_crud');
+    assert.equal(new Set(attempts.map(item => item.attackId)).size, attempts.length);
   } finally {
     globalThis.fetch = originalFetch;
   }
