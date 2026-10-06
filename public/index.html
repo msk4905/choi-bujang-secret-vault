@@ -16,6 +16,15 @@
     li { border: 1px solid #51667c; border-radius: 14px; padding: 17px 19px; background: #1a2a3d; }
     strong { display: block; font-size: 18px; margin-bottom: 5px; }
     li span { color: #bfd0e5; }
+    .auth { margin: 26px 0; padding: 18px; border: 1px solid #51667c; border-radius: 14px; background: #1a2a3d; }
+    .auth form { display: grid; gap: 10px; }
+    .auth label { display: grid; gap: 4px; font-size: 15px; color: #bfd0e5; }
+    .auth input { padding: 10px 12px; border-radius: 8px; border: 1px solid #51667c; background: #101a28; color: #ecf4ff; font-size: 16px; }
+    .auth button { padding: 10px 14px; border-radius: 8px; border: 0; background: #8ad8df; color: #101a28; font-size: 16px; font-weight: 700; cursor: pointer; }
+    .auth button:disabled { opacity: .6; cursor: wait; }
+    #auth-state { margin: 0 0 12px; font-weight: 700; color: #ecf4ff; }
+    #auth-error { margin: 10px 0 0; color: #ffb3c0; font-size: 15px; min-height: 1.2em; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
@@ -24,9 +33,82 @@
     <h1>점령된 자료실</h1>
     <p>지금은 보호 장치가 없는 상태입니다. 아래 기록은 모두 실습을 위해 만든 가상 자료입니다.</p>
     <div class="notice">로그인하지 않은 방문자도 자료를 볼 수 있습니다. 공개 범위를 확인하고, 다음 제작 단계에서 접근을 차례로 막아 주세요.</div>
+    <section class="auth" aria-label="로그인">
+      <p id="auth-state" aria-live="polite">로그인 상태를 확인하는 중입니다.</p>
+      <form id="login-form" hidden>
+        <label>이메일<input id="email" type="email" autocomplete="email" required></label>
+        <label>비밀번호<input id="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit" id="login-button">로그인</button>
+      </form>
+      <button type="button" id="logout-button" hidden>로그아웃</button>
+      <p id="auth-error" role="alert"></p>
+    </section>
     <ul id="notes" aria-live="polite"><li>가상 자료를 불러오는 중입니다.</li></ul>
   </main>
   <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm';
+
+    // 공개용 값입니다(Project URL, publishable key). secret/service_role 키는 넣지 않습니다.
+    const SUPABASE_URL = 'https://cpdddhkjmfmwzsoxiokq.supabase.co';
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_p01y6D6ccMtOUuad_LH_AQ_0dSIqc9M';
+    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+    const stateText = document.querySelector('#auth-state');
+    const form = document.querySelector('#login-form');
+    const emailInput = document.querySelector('#email');
+    const passwordInput = document.querySelector('#password');
+    const loginButton = document.querySelector('#login-button');
+    const logoutButton = document.querySelector('#logout-button');
+    const errorText = document.querySelector('#auth-error');
+
+    function showSession(session) {
+      const user = session?.user;
+      form.hidden = Boolean(user);
+      logoutButton.hidden = !user;
+      stateText.textContent = user
+        ? `로그인됨: ${user.email ?? '이메일 없음'}`
+        : '로그인하지 않은 상태입니다.';
+    }
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      errorText.textContent = '';
+      loginButton.disabled = true;
+      try {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: emailInput.value.trim(),
+          password: passwordInput.value,
+        });
+        if (error) errorText.textContent = `로그인 실패: ${error.message}`;
+      } catch {
+        errorText.textContent = '로그인 실패: 네트워크 오류로 요청을 보내지 못했습니다.';
+      } finally {
+        passwordInput.value = '';
+        loginButton.disabled = false;
+      }
+    });
+
+    logoutButton.addEventListener('click', async () => {
+      errorText.textContent = '';
+      logoutButton.disabled = true;
+      try {
+        const { error } = await supabase.auth.signOut();
+        if (error) errorText.textContent = `로그아웃 실패: ${error.message}`;
+      } catch {
+        errorText.textContent = '로그아웃 실패: 네트워크 오류로 요청을 보내지 못했습니다.';
+      } finally {
+        logoutButton.disabled = false;
+      }
+    });
+
+    supabase.auth.onAuthStateChange((_event, session) => showSession(session));
+    try {
+      const { data } = await supabase.auth.getSession();
+      showSession(data.session);
+    } catch {
+      showSession(null);
+    }
+
     const list = document.querySelector('#notes');
     try {
       const response = await fetch('/api/notes', { cache: 'no-store' });
