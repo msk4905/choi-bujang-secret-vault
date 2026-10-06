@@ -16,16 +16,20 @@ export async function runAttackChecks(config) {
   const response = await fetch(new URL('/data.json', app), {
     redirect: 'error', signal: AbortSignal.timeout(10000),
   });
-  let visible = false;
+  // 2단계: 공개 /data.json에는 가상 메모가 남아 있지 않아야 한다. 본문은 기록하지 않는다.
+  let memosVisible = null;
   if (response.ok) {
     try {
       const data = await response.json();
-      visible = data?.sampleMarker === config.sampleMarker && Array.isArray(data.notes)
-        && data.notes.length > 0;
+      memosVisible = Array.isArray(data?.notes) ? data.notes.length > 0 : null;
     } catch {
-      // A non-JSON response is a failed check, not a successful deployment.
+      // A non-JSON response is not evidence that the memos are gone.
     }
   }
-  return [{ attackId: 'anonymous_note_read', expected: '비로그인 화면에서 가상 메모를 확인',
-    observed: visible ? '비로그인 요청에서 공개 가상 메모 확인 표시가 보임' : `비로그인 요청에서 확인 표시가 보이지 않음 (HTTP ${response.status})` }];
+  const observed = memosVisible === false
+    ? '비로그인 요청에서 공개 /data.json에 가상 메모가 보이지 않음'
+    : memosVisible === true
+      ? '비로그인 요청에서 공개 /data.json에 가상 메모가 아직 보임'
+      : `비로그인 요청의 공개 /data.json 형식을 확인할 수 없음 (HTTP ${response.status})`;
+  return [{ attackId: 'anonymous_note_read', expected: '비로그인 요청에서 공개 /data.json에 가상 메모가 보이지 않음', observed }];
 }
