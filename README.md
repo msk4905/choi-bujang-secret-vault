@@ -50,3 +50,11 @@
 - `/api/ai`와 `/api/threat-intel`은 인증 없이 호출되며 `501`만 돌려주는 빈 틀입니다. 실제 기능은 구현되지 않았습니다.
 - `aleph.config.json`의 `step`은 아직 1이고, `scripts/build-public.mjs`도 1단계 복사 흐름 그대로입니다. 2단계 이후 흐름으로의 전환은 하지 않았습니다.
 - Supabase 쪽 설정(RLS 켬, 권한 회수)은 SQL Editor에서 학생이 실행해 확인해야 하며, 이 저장소에서는 실행해 보지 않았습니다.
+
+## 2단계 저장점: 지금 작동하는 기능과 다시 실행하는 방법
+
+- 작동하는 것: `/` 화면과 정적 `/data.json`(`notes`는 빈 배열), `npm run build`(`--local`은 로컬 확인용), 학습용 Supabase 테이블 스키마 파일(`supabase/schema.sql`, Git 제외).
+- 아직 아닌 것: 보호된 자료 API, 로그인, 소유자별 정책, `/api/ai`·`/api/threat-intel` 구현. `aleph.config.json`의 `step`은 1이며 빌드가 1단계 흐름이라 2단계 값으로 올리지 않았습니다.
+- 다시 실행: `npm run build -- --local`로 화면 자료를 만들고, SQL Editor에서 `supabase/schema.sql`을 실행합니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다. 이때 `aleph.config.json`의 `publicAppUrl`에 본인의 실제 `https://…vercel.app` 주소가 필요합니다.
+- `src/attack-check.mjs`는 실제로 보낸 요청의 결과만 기록하는 자기 점검이며 심판의 판정이 아닙니다. 아직 실행하지 않았습니다.
+- `src/decider.mjs`의 `RULE_IDS`는 시작 틀의 `starter.deny`뿐이며, 판정 규칙은 6단계부터 구현합니다.
