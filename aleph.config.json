@@ -15,6 +15,6 @@
     "PUT /api/notes/:id",
     "DELETE /api/notes/:id"
   ],
-  "originalApiUrl": null,
+  "originalApiUrl": "https://cpdddhkjmfmwzsoxiokq.supabase.co/rest/v1/notes",
   "restoreRoute": null
 }
