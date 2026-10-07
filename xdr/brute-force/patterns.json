@@ -1,0 +1,28 @@
+{
+  "schema": "aleph.xdr.patterns.v1",
+  "moduleKey": "brute-force",
+  "technique": {
+    "id": "T1110",
+    "name": "Brute Force",
+    "url": "https://attack.mitre.org/techniques/T1110/"
+  },
+  "note": "횟수·시간 기준 같은 숫자는 ATT&CK 문서에 정해져 있지 않습니다. 이 파일에는 숫자를 적지 않았고, 기준은 decide.mjs에서 경보 묶음을 보고 학생이 정합니다.",
+  "patterns": [
+    {
+      "name": "same-address-failure-burst",
+      "title": "짧은 시간 같은 주소의 로그인 실패 연속",
+      "condition": "같은 출발 주소(data.srcip)에서 짧은 시간 안에 로그인 실패가 연속으로 쌓이고, 그 사이에 성공이 없다. 실패 건수는 data.count, 설명은 rule.description에 있다.",
+      "evidence": "ATT&CK T1110(및 하위 T1110.001 Password Guessing)은 공격자가 올바른 비밀번호를 모를 때 가능한 값을 반복해 넣어 보는 방식이라고 설명한다.",
+      "techniqueId": "T1110.001",
+      "url": "https://attack.mitre.org/techniques/T1110/001/"
+    },
+    {
+      "name": "multi-account-same-password",
+      "title": "여러 계정에 같은 비밀번호 대입",
+      "condition": "같은 출발 주소가 서로 다른 여러 계정(data.accounts 또는 설명)에 같은 비밀번호로 실패를 이어 간다. 한 계정당 실패는 적어도 계정 수가 많다.",
+      "evidence": "ATT&CK T1110.003 Password Spraying은 계정 잠금을 피하려고 흔한 비밀번호 하나를 여러 계정에 차례로 대입하는 방식이라고 설명한다.",
+      "techniqueId": "T1110.003",
+      "url": "https://attack.mitre.org/techniques/T1110/003/"
+    }
+  ]
+}
