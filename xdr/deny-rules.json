@@ -109,6 +109,91 @@
       "reason": "같은 주소의 로그인 실패 연속 (bf.burst-same-source)",
       "createdAt": "2026-10-11T10:42:41.887Z",
       "expiresAt": "2026-10-11T11:42:41.947Z"
+    },
+    {
+      "ruleId": "xdr.web-injection.deny.203.0.113.10",
+      "srcip": "203.0.113.10",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "wi-01",
+        "wi-02"
+      ],
+      "confidence": 0.93,
+      "reason": "요청 인자 안의 SQL 구문",
+      "createdAt": "2026-10-11T10:54:51.918Z",
+      "expiresAt": "2026-10-11T11:54:52.014Z"
+    },
+    {
+      "ruleId": "xdr.web-injection.deny.198.51.100.15",
+      "srcip": "198.51.100.15",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "wi-03"
+      ],
+      "confidence": 0.89,
+      "reason": "경로 거슬러 올라가기(../) 반복",
+      "createdAt": "2026-10-11T10:54:51.918Z",
+      "expiresAt": "2026-10-11T11:54:52.014Z"
+    },
+    {
+      "ruleId": "xdr.web-injection.deny.192.0.2.15",
+      "srcip": "192.0.2.15",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "wi-04"
+      ],
+      "confidence": 0.99,
+      "reason": "요청 인자 안의 SQL 구문",
+      "createdAt": "2026-10-11T10:54:51.918Z",
+      "expiresAt": "2026-10-11T11:54:52.014Z"
+    },
+    {
+      "ruleId": "xdr.web-injection.deny.203.0.113.18",
+      "srcip": "203.0.113.18",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "wi-05"
+      ],
+      "confidence": 0.95,
+      "reason": "요청 인자 안의 SQL 구문",
+      "createdAt": "2026-10-11T10:54:51.918Z",
+      "expiresAt": "2026-10-11T11:54:52.014Z"
+    },
+    {
+      "ruleId": "xdr.web-injection.deny.198.51.100.18",
+      "srcip": "198.51.100.18",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "wi-06"
+      ],
+      "confidence": 0.86,
+      "reason": "T1190 표시가 붙은 주입 표기 반복 (이름 있는 패턴 밖)",
+      "createdAt": "2026-10-11T10:54:51.918Z",
+      "expiresAt": "2026-10-11T11:54:52.014Z"
+    },
+    {
+      "ruleId": "xdr.web-injection.deny.192.0.2.21",
+      "srcip": "192.0.2.21",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "wi-07"
+      ],
+      "confidence": 0.95,
+      "reason": "경로 거슬러 올라가기(../) 반복",
+      "createdAt": "2026-10-11T10:54:51.918Z",
+      "expiresAt": "2026-10-11T11:54:52.014Z"
+    },
+    {
+      "ruleId": "xdr.web-injection.deny.203.0.113.22",
+      "srcip": "203.0.113.22",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "wi-08"
+      ],
+      "confidence": 0.91,
+      "reason": "요청 인자 안의 SQL 구문",
+      "createdAt": "2026-10-11T10:54:51.918Z",
+      "expiresAt": "2026-10-11T11:54:52.014Z"
     }
   ]
 }

@@ -141,3 +141,10 @@
 - 작동하는 것: `xdr/brute-force/decide.mjs`가 연습 경보 28건을 block 10·alert 9·record 9로 나눕니다. 패턴 근거는 `patterns.json`(MITRE T1110), 확인용 읽기는 `read-alerts.mjs`, 거부 규칙 파일과 알림 기록은 `respond.mjs`가 `xdr/deny-rules.json`·`xdr/alerts.log`에 씁니다.
 - 다시 실행: `npm run xdr:run -- brute-force`로 `result.json`을 만들고, `node xdr/brute-force/respond.mjs`로 규칙·알림을 만듭니다. 연습 경보에 맞춘 로컬 결과이며 심판의 판정이 아닙니다.
 - 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없습니다.
+
+## 보너스 xdr-02 저장점: 웹 주입 공격 탐지
+
+- 작동하는 것: `xdr/web-injection/decide.mjs`가 연습 경보 26건을 block 8·alert 9·record 9로 나눕니다. 패턴 근거는 `patterns.json`(MITRE T1190: 요청 인자 안의 SQL 구문·스크립트 태그·`../` 반복), 확인용 읽기는 `read-alerts.mjs`, 거부 규칙과 알림 기록은 `respond.mjs`가 `xdr/deny-rules.json`·`xdr/alerts.log`에 씁니다. `respond.mjs`는 brute-force 규칙을 건드리지 않고 `xdr.web-injection.` 규칙만 고칩니다.
+- 다시 실행: `npm run xdr:run -- web-injection`으로 `result.json`을 만들고, `node xdr/web-injection/respond.mjs`로 규칙·알림을 만듭니다. 연습 경보에 맞춘 로컬 결과이며 심판의 판정이 아닙니다.
+- 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없습니다.
+- 알아 둘 점: `decide.mjs`는 이름 있는 패턴 밖의 경보도 경보 자신의 T1190 표시와 반복 횟수로 판정합니다(명령 구분자 경보 1건이 block, 반복 없는 애매한 9건이 alert). `203.0.113.10`은 brute-force와 웹 주입 규칙이 둘 다 있어, `brute-force/respond.mjs`를 다시 실행하면 주소 기준 합치기 때문에 웹 주입 규칙 하나가 사라질 수 있습니다.
