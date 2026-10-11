@@ -135,3 +135,9 @@
 - 서버 전용 키로 접속하는 서버 함수는 RLS와 테이블 권한을 거치지 않으므로, 접근 구분은 소유자 검사가 맡습니다.
 - `owner_id`에는 `auth.users` 외래키가 없고, `/api/ai`·`/api/threat-intel`은 `501`만 돌려주는 빈 틀입니다.
 - `allowedRoutes`는 `"METHOD /경로"` 문자열이며 운영 측 양식과 다를 수 있습니다.
+
+## 보너스 xdr-01 저장점: 무차별 로그인 공격 탐지
+
+- 작동하는 것: `xdr/brute-force/decide.mjs`가 연습 경보 28건을 block 10·alert 9·record 9로 나눕니다. 패턴 근거는 `patterns.json`(MITRE T1110), 확인용 읽기는 `read-alerts.mjs`, 거부 규칙 파일과 알림 기록은 `respond.mjs`가 `xdr/deny-rules.json`·`xdr/alerts.log`에 씁니다.
+- 다시 실행: `npm run xdr:run -- brute-force`로 `result.json`을 만들고, `node xdr/brute-force/respond.mjs`로 규칙·알림을 만듭니다. 연습 경보에 맞춘 로컬 결과이며 심판의 판정이 아닙니다.
+- 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없습니다.

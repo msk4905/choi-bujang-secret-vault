@@ -1,0 +1,114 @@
+{
+  "schema": "aleph.xdr.deny-rules.v1",
+  "rules": [
+    {
+      "ruleId": "xdr.brute-force.deny.203.0.113.10",
+      "srcip": "203.0.113.10",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "bf-01",
+        "bf-02"
+      ],
+      "confidence": 0.92,
+      "reason": "같은 주소의 로그인 실패 연속 (bf.burst-same-source)",
+      "createdAt": "2026-10-11T10:42:41.887Z",
+      "expiresAt": "2026-10-11T11:42:41.947Z"
+    },
+    {
+      "ruleId": "xdr.brute-force.deny.198.51.100.20",
+      "srcip": "198.51.100.20",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "bf-03"
+      ],
+      "confidence": 0.91,
+      "reason": "같은 주소의 로그인 실패 연속 (bf.burst-same-source)",
+      "createdAt": "2026-10-11T10:42:41.887Z",
+      "expiresAt": "2026-10-11T11:42:41.947Z"
+    },
+    {
+      "ruleId": "xdr.brute-force.deny.192.0.2.30",
+      "srcip": "192.0.2.30",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "bf-04"
+      ],
+      "confidence": 0.92,
+      "reason": "같은 주소의 로그인 실패 연속 (bf.burst-same-source)",
+      "createdAt": "2026-10-11T10:42:41.887Z",
+      "expiresAt": "2026-10-11T11:42:41.947Z"
+    },
+    {
+      "ruleId": "xdr.brute-force.deny.203.0.113.21",
+      "srcip": "203.0.113.21",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "bf-05"
+      ],
+      "confidence": 0.94,
+      "reason": "여러 계정에 같은 비밀번호 대입 (bf.spray-many-accounts)",
+      "createdAt": "2026-10-11T10:42:41.887Z",
+      "expiresAt": "2026-10-11T11:42:41.947Z"
+    },
+    {
+      "ruleId": "xdr.brute-force.deny.198.51.100.44",
+      "srcip": "198.51.100.44",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "bf-06"
+      ],
+      "confidence": 0.93,
+      "reason": "같은 주소의 로그인 실패 연속 (bf.burst-same-source)",
+      "createdAt": "2026-10-11T10:42:41.887Z",
+      "expiresAt": "2026-10-11T11:42:41.947Z"
+    },
+    {
+      "ruleId": "xdr.brute-force.deny.203.0.113.15",
+      "srcip": "203.0.113.15",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "bf-07"
+      ],
+      "confidence": 0.91,
+      "reason": "같은 주소의 로그인 실패 연속 (bf.burst-same-source)",
+      "createdAt": "2026-10-11T10:42:41.887Z",
+      "expiresAt": "2026-10-11T11:42:41.947Z"
+    },
+    {
+      "ruleId": "xdr.brute-force.deny.192.0.2.18",
+      "srcip": "192.0.2.18",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "bf-08"
+      ],
+      "confidence": 0.94,
+      "reason": "같은 주소의 로그인 실패 연속 (bf.burst-same-source)",
+      "createdAt": "2026-10-11T10:42:41.887Z",
+      "expiresAt": "2026-10-11T11:42:41.947Z"
+    },
+    {
+      "ruleId": "xdr.brute-force.deny.198.51.100.8",
+      "srcip": "198.51.100.8",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "bf-09"
+      ],
+      "confidence": 0.93,
+      "reason": "여러 계정에 같은 비밀번호 대입 (bf.spray-many-accounts)",
+      "createdAt": "2026-10-11T10:42:41.887Z",
+      "expiresAt": "2026-10-11T11:42:41.947Z"
+    },
+    {
+      "ruleId": "xdr.brute-force.deny.203.0.113.40",
+      "srcip": "203.0.113.40",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "bf-10"
+      ],
+      "confidence": 0.96,
+      "reason": "같은 주소의 로그인 실패 연속 (bf.burst-same-source)",
+      "createdAt": "2026-10-11T10:42:41.887Z",
+      "expiresAt": "2026-10-11T11:42:41.947Z"
+    }
+  ]
+}

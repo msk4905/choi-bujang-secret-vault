@@ -1,0 +1,19 @@
+{
+  "schema": "aleph.xdr.patterns.v1",
+  "moduleKey": "brute-force",
+  "basis": "MITRE ATT&CK T1110 Brute Force",
+  "patterns": [
+    {
+      "id": "bf.burst-same-source",
+      "name": "같은 주소의 로그인 실패 연속",
+      "condition": "같은 srcip에서 짧은 시간 안에 로그인 실패가 연속으로 쌓입니다. 건수는 data.count, 시간 폭은 rule.description 에서 읽습니다. 건수·시간 기준값은 연습 경보를 보고 학생이 정합니다.",
+      "basis": "T1110.001 Password Guessing: 공격자가 한 계정에 비밀번호를 반복해 추측하며 시도하는 방식입니다."
+    },
+    {
+      "id": "bf.spray-many-accounts",
+      "name": "여러 계정에 같은 비밀번호 대입",
+      "condition": "같은 srcip가 서로 다른 계정 여러 개에 같은 비밀번호를 차례로 넣습니다. 계정 수는 data.accounts 의 쉼표 목록에서 셉니다. 계정 수 기준값은 연습 경보를 보고 학생이 정합니다.",
+      "basis": "T1110.003 Password Spraying: 흔한 비밀번호 하나를 많은 계정에 대입해 계정 잠금을 피하는 방식입니다."
+    }
+  ]
+}
