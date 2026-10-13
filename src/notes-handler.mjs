@@ -11,6 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from './verify-login.mjs';
 import { noteResourceId } from './resources.mjs';
+import { readRestoreInput, restoreNote } from './notes-restore.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_TITLE = 200;
@@ -54,7 +55,9 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {
     response.setHeader('Cache-Control', 'no-store');
     const rawId = request.query?.id;
     const hasId = rawId !== undefined;
-    const allowed = hasId ? ['GET', 'PUT', 'DELETE'] : ['GET', 'POST'];
+    // POST /api/notes/:id/restore는 vercel.json이 ?id=:id&restore=1로 넘깁니다. 복원 경로는 POST만 받습니다.
+    const isRestore = request.query?.restore === '1';
+    const allowed = isRestore ? ['POST'] : hasId ? ['GET', 'PUT', 'DELETE'] : ['GET', 'POST'];
     if (!allowed.includes(request.method)) {
       response.setHeader('Allow', allowed.join(', '));
       return response.status(405).json({ error: 'METHOD_NOT_ALLOWED' });
@@ -76,11 +79,22 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {
       return response.status(401).json({ error: 'UNAUTHENTICATED' });
     }
 
-    if (hasId && (typeof rawId !== 'string' || !UUID.test(rawId))) {
+    if ((hasId || isRestore) && (typeof rawId !== 'string' || !UUID.test(rawId))) {
       return response.status(400).json({ error: 'INVALID_ID' });
     }
     // 8단계: 이 요청이 가리키는 자원 ID를 서버가 경로에서만 계산합니다(응답에는 싣지 않음).
     request.resourceId = noteResourceId(hasId ? rawId : undefined);
+    if (isRestore) {
+      const restoreInput = readRestoreInput(request);
+      if (!restoreInput) return response.status(400).json({ error: 'INVALID_RESTORE' });
+      try {
+        const result = await restoreNote({ db: deps.db, principal, id: rawId.toLowerCase(), input: restoreInput });
+        return response.status(result.code).json(result.json);
+      } catch {
+        console.error('notes restore failed');
+        return response.status(502).json({ error: 'NOTES_UNAVAILABLE' });
+      }
+    }
     const input = request.method === 'POST' || request.method === 'PUT' ? readInput(request) : null;
     if ((request.method === 'POST' || request.method === 'PUT') && !input) {
       return response.status(400).json({ error: 'INVALID_NOTE' });

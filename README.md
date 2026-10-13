@@ -195,3 +195,28 @@
 - 설정: `aleph.config.json`의 `step`은 9이고 빌드와 `src/attack-check.mjs`의 단계 목록에 9를 더했습니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`allowedRoutes`·`originalApiUrl`은 바꾸지 않았습니다. `RULE_IDS`는 8단계와 같습니다(`src/decider.mjs`는 바꾸지 않음).
 - `src/attack-check.mjs`: `detect_revocation_proposal`을 **미실행**으로 더했습니다. 5단계 ①~④, A·B 로그인 확인, 이전 미실행 항목도 여전히 하지 않았습니다.
 - 제출 묶음: 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).
+
+## 10단계 작업: 비공개 사본에서 메모 한 건만 복원 (저장점 아님)
+
+- 서비스·경로: 기존 메모 서버 함수 `/api/notes`(새 함수 파일 없음)의 `POST /api/notes/:id/restore`입니다. `vercel.json`이 `/api/notes/:id/restore`를 `/api/notes?id=:id&restore=1`로 넘기고, 이 경로는 POST만 받습니다. `aleph.config.json`의 `allowedRoutes`에 같은 경로를 더했고 `restoreRoute`에도 적었습니다(`restoreRoute`의 적는 형식이 운영 측 양식과 같은지는 확인하지 못했습니다). `step`은 올리지 않았습니다.
+- 사본: Supabase의 비공개 표 `public.notes_backup`(서버 전용 키로만 읽음, 브라우저 권한 없음)입니다. 사본 자료와 SQL 결과는 이 저장소에 두지 않습니다. 표는 학생이 SQL Editor에서 직접 만들며, 아래 SQL에는 메모 내용이 없습니다. 이 저장소에서는 실제 DB에 접속하지 않아 표가 있는지, SQL이 그대로 실행되는지 확인하지 못했습니다.
+- 요청: 로그인한 사용자의 `Authorization: Bearer` 토큰과 본문 `{"contentSha256":"<64자리 소문자 16진수>"}`뿐입니다. 소유자는 서버가 확인한 로그인 결과만 쓰고 본문의 `owner_id`·`userId` 같은 값은 읽지 않습니다.
+- 대조: 복원 전에 사본의 ID가 요청한 ID와, 사본의 `owner_id`가 확인된 사용자와, 사본 내용의 해시가 사본에 적힌 해시 및 요청한 해시와 모두 같아야 합니다. 복원 뒤에는 되살린 행을 다시 읽어 ID·소유자·내용 해시가 사본과 같은지 확인하고, 다르면 `502 RESTORE_UNVERIFIED`입니다. 해시는 `sha256(제목 UTF-8 바이트 + 0x00 + 본문 UTF-8 바이트)`의 소문자 16진수입니다.
+- 결과: 현재 메모가 없으면 새로 만들고(`201`, `restored: "created"`), 같은 ID의 본인 메모가 있으면 사본 내용으로 한 건만 고치며(`200`, `"updated"`), 이미 같으면 쓰지 않습니다(`200`, `"unchanged"`). 응답에는 ID와 결과만 있고 메모 내용은 싣지 않습니다. 다른 메모와 사본 표는 고치지 않습니다.
+- 거부(아무것도 쓰지 않음): 토큰 없음 `401`, 사본 없음·남의 사본·같은 ID의 현재 메모 주인이 다름 `404 NOT_FOUND`(구별하지 않음), 요청 해시가 다름 `409 HASH_MISMATCH`, 사본 내용이 적힌 해시와 다름 `409 BACKUP_HASH_MISMATCH`, 본문·ID 형식 오류 `400`, POST가 아닌 메서드 `405`.
+- 감사 기록: 이 저장소와 DB 스키마에는 메모용 감사 표가 없어서 새로 만들지 않았습니다. 복원 성공·거부 사유는 서버 로그에 짧은 코드만 남고(`notes restored: created`, `notes restore denied: not_owner` 등) ID·본문·토큰은 싣지 않습니다. 이 복원은 기존 로그나 다른 표를 지우거나 고치지 않습니다. 영구 감사 기록이 필요하면 학생이 표를 정해야 합니다.
+- 학생이 SQL Editor에서 실행할 사본 표(내용 없음):
+
+```sql
+create table public.notes_backup (
+  id uuid primary key, owner_id uuid not null, title text not null, content text not null,
+  content_sha256 text not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
+  backed_up_at timestamptz not null default now());
+alter table public.notes_backup enable row level security;
+revoke all on public.notes_backup from public, anon, authenticated;
+```
+
+- 사본 한 건 만들기(시험 계정 B의 가상 메모 한 건만, `<…>`는 학생이 채움): `insert into public.notes_backup (id, owner_id, title, content, content_sha256) select id, owner_id, title, content, encode(sha256(convert_to(title,'UTF8') || '\x00'::bytea || convert_to(content,'UTF8')),'hex') from public.notes where id = '<B 메모 id>' and owner_id = '<B 사용자 id>';` 그다음 `select content_sha256 from public.notes_backup where id = '<B 메모 id>';`로 해시를 읽어 요청 본문에 넣습니다.
+- 확인 순서(학생이 배포 주소에서, 아직 하지 않음): ① B로 로그인해 메모를 하나 만들고 위 SQL로 사본을 만듭니다. ② 앱에서 그 메모를 지우거나 고칩니다. ③ B 토큰으로 `POST /api/notes/<id>/restore`에 해시를 보내 `201` 또는 `200`을 받고, 메모가 사본 내용으로 돌아왔는지 봅니다. 정상: `verified: true`. 거부되어야 할 결과: 해시를 한 글자 바꾸면 `409`, A 토큰이면 `404`이고 메모는 바뀌지 않아야 합니다.
+- 코드 시험: `npm ci` 뒤 `node --test test/notes-restore.test.mjs`(가짜 DB·가짜 로그인 검사기)와 `node --test test/*.test.mjs`입니다. 시험 계정 B의 가상 메모만 복원 대상으로 썼고, A는 B의 메모를 요청했을 때 거부되는지 보는 요청자로만 나옵니다. 실제 Supabase·배포 확인이 아니며 심판 판정이 아닙니다.
+- 아직 아닌 것: 판정기(`src/decider.mjs`)는 이 경로와 연결되어 있지 않고 `RULE_IDS`는 그대로입니다. `src/attack-check.mjs`에는 이 경로의 점검을 더하지 않았습니다(미실행). 사본 표에는 소유자별 접근 정책이 없고 서버 전용 키로만 읽으므로, 접근 구분은 위 소유자 대조가 맡습니다. 사본을 만드는 일은 학생의 SQL 실행이며 서버 경로로 만들지 않았습니다.
