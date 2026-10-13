@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { createNotesHandler } from '../src/notes-handler.mjs';
+import { createRestoreRoute } from '../api/restore/[id].js';
 import { runSelfCheck } from '../scripts/restore-selfcheck.mjs';
 
 // 실제 핸들러(메모 API + 복구 경로)를 가짜 DB 위에 올린 로컬 서버로 확인 스크립트를 시험합니다. 실제 Supabase·실제 토큰은 쓰지 않습니다.
@@ -42,9 +43,11 @@ function fakeDb(rows) {
 
 async function withServer(options, fn) {
   const rows = [];
-  const handler = createNotesHandler({ getDeps: () => ({
+  const getDeps = () => ({
     verify: async auth => (auth === `Bearer ${TOKEN}` ? { userId: USER } : null), db: fakeDb(rows),
-  }), ...options });
+  });
+  const handler = createNotesHandler({ getDeps, ...options });
+  const restoreRoute = createRestoreRoute({ getDeps, ...options });
   const server = createServer((req, res) => {
     const chunks = [];
     req.on('data', c => chunks.push(c));
@@ -57,7 +60,7 @@ async function withServer(options, fn) {
       const text = Buffer.concat(chunks).toString('utf8');
       if (text) { try { body = JSON.parse(text); } catch { body = text; } }
       const headers = {};
-      handler({ method: req.method, query, headers: { authorization: req.headers.authorization }, body, ...(restore ? { restoreRoute: true } : {}) }, {
+      (restore ? restoreRoute : handler)({ method: req.method, query, headers: { authorization: req.headers.authorization }, body }, {
         setHeader: (k, v) => { headers[k] = v; },
         status: code => ({
           json: json => { res.writeHead(code, { ...headers, 'Content-Type': 'application/json' }); res.end(JSON.stringify(json)); },

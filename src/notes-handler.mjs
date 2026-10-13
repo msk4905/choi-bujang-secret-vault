@@ -11,7 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from './verify-login.mjs';
 import { noteResourceId } from './resources.mjs';
-import { readRestoreInput, restoreNote, saveBackup } from './notes-restore.mjs';
+import { saveBackup } from './notes-backup.mjs';
 import { traceAnonymous, traceJudge } from './judge-trace.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -56,8 +56,8 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, save
     response.setHeader('Cache-Control', 'no-store');
     const rawId = request.query?.id;
     const hasId = rawId !== undefined;
-    // 복구 요청은 api/restore/[id].js(POST /api/restore/:id)가 restoreRoute 표시를 붙여 넘긴 것뿐입니다. 쿼리 값으로는 열리지 않고 POST만 받습니다.
-    const isRestore = request.restoreRoute === true;
+    // 복구 요청은 api/restore/[id].js(POST /api/restore/:id)가 자기 restore 함수를 붙여 넘긴 것뿐입니다. 쿼리 값으로는 열리지 않고 POST만 받습니다.
+    const isRestore = typeof request.restore === 'function';
     const allowed = isRestore ? ['POST'] : hasId ? ['GET', 'PUT', 'DELETE'] : ['GET', 'POST'];
     if (!allowed.includes(request.method)) {
       response.setHeader('Allow', allowed.join(', '));
@@ -91,10 +91,8 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, save
     // 8단계: 이 요청이 가리키는 자원 ID를 서버가 경로에서만 계산합니다(응답에는 싣지 않음).
     request.resourceId = noteResourceId(hasId ? rawId : undefined);
     if (isRestore) {
-      const restoreInput = readRestoreInput(request);
-      if (!restoreInput) return response.status(400).json({ error: 'INVALID_RESTORE' });
       try {
-        const result = await restoreNote({ db: deps.db, principal, id: rawId.toLowerCase(), input: restoreInput });
+        const result = await request.restore({ db: deps.db, principal, id: rawId.toLowerCase(), body: request.body });
         return response.status(result.code).json(result.json);
       } catch {
         console.error('notes restore failed');

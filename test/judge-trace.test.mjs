@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createNotesHandler } from '../src/notes-handler.mjs';
 import { shapeOf } from '../src/judge-trace.mjs';
-import { noteHash } from '../src/notes-restore.mjs';
+import { noteHash } from '../src/notes-backup.mjs';
+import { createRestoreRoute } from '../api/restore/[id].js';
 
 // 심판 요청의 "모양"만 로그에 남고 값(메모 내용·ID·해시·토큰)은 남지 않는지 가짜 DB로 확인합니다.
 const JUDGE_B = { kind: 'judge', userId: '22222222-2222-4222-8222-222222222222', identity: 'b', runId: '99999999-9999-4999-8999-999999999999' };
@@ -33,10 +34,12 @@ function fakeDb(rows) {
 
 function setup() {
   const rows = [];
-  const handler = createNotesHandler({ getDeps: () => ({ verify: async auth => tokens[auth] ?? null, db: fakeDb(rows) }) });
+  const getDeps = () => ({ verify: async auth => tokens[auth] ?? null, db: fakeDb(rows) });
+  const handler = createNotesHandler({ getDeps });
+  const restoreRoute = createRestoreRoute({ getDeps });
   const call = (method, { id, auth, body, restore, headers = {} } = {}) => new Promise(resolve => {
     const response = { setHeader() {}, status: code => ({ json: json => resolve({ code, json }), end: () => resolve({ code }) }) };
-    handler({ method, query: id ? { id } : {}, headers: { authorization: auth, ...headers }, body, ...(restore ? { restoreRoute: true } : {}) }, response);
+    (restore ? restoreRoute : handler)({ method, query: id ? { id } : {}, headers: { authorization: auth, ...headers }, body }, response);
   });
   return { rows, call };
 }

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { createNotesHandler } from '../src/notes-handler.mjs';
-import { backupOwnerId, backupRow, backupRowId, noteHash } from '../src/notes-restore.mjs';
+import { backupOwnerId, backupRow, backupRowId, noteHash } from '../src/notes-backup.mjs';
+import { createRestoreRoute } from '../api/restore/[id].js';
 
 // 가짜 로그인 검사기와 메모리 DB만 씁니다. 실제 Supabase·실제 토큰은 쓰지 않습니다.
 // 복원 대상은 시험 계정 B의 가상 메모뿐입니다. A는 B의 메모를 요청했을 때 거부되는지 보는 요청자로만 나옵니다.
@@ -77,14 +78,16 @@ function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWri
 function setup(options) {
   const rows = [];
   const writes = [];
-  const handler = createNotesHandler({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows, writes, options) }) });
+  const getDeps = () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows, writes, options) });
+  const handler = createNotesHandler({ getDeps });
+  const restoreRoute = createRestoreRoute({ getDeps });
   const call = (method, { id, auth = AUTH_B, body, restore = false } = {}) => new Promise(resolve => {
     const response = {
       setHeader() {},
       status(code) { return { json: json => resolve({ code, json }), end: () => resolve({ code }) }; },
     };
-    // 복구 요청은 api/restore/[id].js가 붙이는 restoreRoute 표시로만 열린다(쿼리 값으로는 열리지 않음).
-    handler({ method, query: id === undefined ? {} : { id }, headers: { authorization: auth }, body, ...(restore ? { restoreRoute: true } : {}) }, response);
+    // 복구 요청은 api/restore/[id].js의 경로 함수로만 처리된다(쿼리 값으로는 열리지 않음).
+    (restore ? restoreRoute : handler)({ method, query: id === undefined ? {} : { id }, headers: { authorization: auth }, body }, response);
   });
   const restore = (opts = {}) => call('POST', { id: B_NOTE, restore: true, ...opts });
   return { rows, writes, call, restore };
@@ -235,8 +238,8 @@ test('같은 ID의 현재 메모 주인이 사본 소유자와 다르면 덮어�
 
 // 같은 메모리 DB를 쓰되, 복원 때 쓰는 첫 쓰기만 어긋나게 만드는 핸들러를 따로 만든다.
 const callOn = (rows, options) => {
-  const handler = createNotesHandler({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows, [], options) }) });
-  return new Promise(resolve => handler({ method: 'POST', query: { id: B_NOTE }, headers: { authorization: AUTH_B }, restoreRoute: true },
+  const handler = createRestoreRoute({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows, [], options) }) });
+  return new Promise(resolve => handler({ method: 'POST', query: { id: B_NOTE }, headers: { authorization: AUTH_B } },
     { setHeader() {}, status: code => ({ json: json => resolve({ code, json }) }) }));
 };
 
