@@ -8,10 +8,11 @@
 //   ④ 쓴 뒤 사본과 되살린 행을 새로 읽어 ID·소유자·내용 해시를 다시 대조한다. 어긋나면 쓴 내용을 되돌리고 멈춘다(502).
 // 사용자·소유자는 서버가 확인한 로그인 결과만 씁니다. 운영 정책에는 접근하지 않고, 감사 기록은 지우거나 고치지 않습니다
 // (복구 결과는 서버 로그에 짧은 코드로만 남기며 ID·본문·토큰은 싣지 않습니다).
+// 감사 기록은 이 파일의 appendAudit이 감사 표에 덧붙이기만 합니다(모든 결과에 한 줄, 읽기·수정·삭제 없음).
 // 로그인 확인·환경 설정·심판 요청 추적은 src/notes-handler.mjs가 맡고, 이 파일의 restore 함수를 부릅니다.
 import { createHash } from 'node:crypto';
 import { createNotesHandler } from '../../src/notes-handler.mjs';
-import { BACKUP_TABLE, noteHash, writeAudit } from '../../src/notes-backup.mjs';
+import { AUDIT_TABLE, BACKUP_TABLE, noteHash } from '../../src/notes-backup.mjs';
 
 const HEX64 = /^[0-9a-f]{64}$/u;
 
@@ -70,6 +71,16 @@ export function readRestoreInput(request) {
 
 const logDenied = (reason) => console.warn(`notes restore denied: ${reason}`);
 
+// 감사 기록: 복구 요청의 결과마다 감사 표(vault_audit)에 한 줄을 덧붙입니다. INSERT만 하고 이 표의 행은 읽지도 고치지도 지우지도 않습니다
+// (supabase/step10-backup.sql이 서버 키의 수정·삭제 권한도 회수함). 담는 값은 행동 이름, 자원 ID(note:<id>), 요청자 ID 앞 8자리, 짧은 사유뿐이며
+// 메모 제목·본문·토큰은 싣지 않습니다. 남기지 못해도 복구 결과는 바꾸지 않고 서버 로그에만 남깁니다.
+async function appendAudit(db, principal, id, action, detail = {}) {
+  try {
+    const { error } = await db.from(AUDIT_TABLE).insert({ action, resource: `note:${id}`, actor: String(principal.userId).slice(0, 8), detail });
+    if (error) throw error;
+  } catch { console.error(`notes restore audit not saved (${action})`); }
+}
+
 // 사본을 새로 읽고 검증합니다: 전용 표에서 그 메모의 사본을 읽고, 메모 ID·소유자가 요청과 같은지, 저장된 해시가 제목·내용으로 다시 계산한 해시와 같은지 모두 맞아야 합니다.
 async function readBackup(db, principal, noteId) {
   const { data: row, error } = await db.from(BACKUP_TABLE)
@@ -95,10 +106,10 @@ export async function restoreNote({ db, principal, id, input }) {
     readBackup(db, principal, id),
     db.from('notes').select('id, title, content, owner_id').eq('id', id).maybeSingle(),
   ]);
-  const resource = `note:${id}`;
-  const audit = (action, detail) => writeAudit(db, { action, resource, actor: principal.userId, detail });
+  const audit = (action, detail) => appendAudit(db, principal, id, action, detail);
   if (found.error === 'no_backup') {
     logDenied('no_backup');
+    await audit('restore_denied', { reason: 'no_backup' });
     return { code: 404, json: { error: 'NOT_FOUND' } };
   }
   if (found.error === 'not_owner') {
@@ -119,11 +130,13 @@ export async function restoreNote({ db, principal, id, input }) {
   const allIn = (list, ok) => (list ?? []).every(ok);
   if (!allIn(input.hashes, (h) => h === hash || h === bodyOnlyHash)) {
     logDenied('request_hash_differs');
+    await audit('restore_stopped', { reason: 'request_hash_differs' });
     return { code: 409, json: { error: 'HASH_MISMATCH' } };
   }
   if (!allIn(input.ids, (v) => v === id) || !allIn(input.owners, (v) => v === principal.userId)
       || !allIn(input.titles, (v) => v === record.title) || !allIn(input.contents, (v) => v === record.content)) {
     logDenied('claim_differs');
+    await audit('restore_stopped', { reason: 'claim_differs' });
     return { code: 409, json: { error: 'CLAIM_MISMATCH' } };
   }
 
@@ -143,6 +156,7 @@ export async function restoreNote({ db, principal, id, input }) {
   const willChange = live ? ['title', 'content'].filter((field) => live[field] !== record[field]) : ['title', 'content'];
   if (input.dryRun) {
     console.info('notes restore preview');
+    await audit('restore_preview', { contentHash: hash, willChange });
     return { code: 200, json: { id, ownerId: principal.userId, contentSha256: hash, preview: true, version, action, willChange } };
   }
 
@@ -152,12 +166,12 @@ export async function restoreNote({ db, principal, id, input }) {
     const { data, error } = await db.from('notes').update({ title: record.title, content: record.content })
       .eq('id', id).eq('owner_id', principal.userId).select('id, owner_id');
     if (error) throw error;
-    if (!data?.length) { logDenied('owner_changed'); return { code: 404, json: { error: 'NOT_FOUND' } }; }
+    if (!data?.length) { logDenied('owner_changed'); await audit('restore_denied', { reason: 'owner_changed' }); return { code: 404, json: { error: 'NOT_FOUND' } }; }
   } else {
     const { error } = await db.from('notes').insert({
       id, title: record.title, content: record.content, owner_id: principal.userId,
     });
-    if (error?.code === '23505') return { code: 409, json: { error: 'ID_EXISTS' } };
+    if (error?.code === '23505') { await audit('restore_stopped', { reason: 'id_exists' }); return { code: 409, json: { error: 'ID_EXISTS' } }; }
     if (error) throw error;
   }
 

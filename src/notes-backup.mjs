@@ -27,14 +27,3 @@ export async function saveBackup({ db, principal, noteId, title, content, source
     console.error('notes backup not saved');
   }
 }
-
-// 감사 기록은 덧붙이기만 합니다(지우거나 고치지 않음). 남기지 못해도 복구 결과는 바꾸지 않고 서버 로그에만 남깁니다.
-// 담는 값: 행동 이름, 자원 ID(note:<id>), 요청자 ID 앞 8자리, 짧은 사유. 메모 제목·본문·토큰은 싣지 않습니다.
-export async function writeAudit(db, { action, resource, actor, detail = {} }) {
-  try {
-    const { error } = await db.from(AUDIT_TABLE).insert({ action, resource, actor: String(actor ?? '-').slice(0, 8), detail });
-    if (error) throw error;
-  } catch {
-    console.error(`audit not saved (${action})`);
-  }
-}

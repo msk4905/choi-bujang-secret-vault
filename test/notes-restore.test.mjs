@@ -514,3 +514,26 @@ test('복구 경로는 선언한 api/restore/[id].js 하나뿐이다: 설정·�
     if (saved.key !== undefined) process.env.SUPABASE_SECRET_KEY = saved.key;
   }
 });
+
+test('복구 요청의 결과마다 감사 표에 한 줄이 덧붙고, 기존 감사 행과 메모 내용은 담기지 않는다', async () => {
+  const state = setup();
+  state.audit.push({ id: 1, action: 'earlier', resource: 'note:x', actor: 'abcd1234', detail: {} }); // 이미 있던 감사 행
+  const earlier = JSON.stringify(state.audit[0]);
+  await bCreatesAndTampers(state);
+  await quiet(() => state.restore({ body: { dryRun: true } }));
+  await quiet(() => state.restore({ body: { contentSha256: 'a'.repeat(64) } }));
+  await quiet(() => state.restore({ auth: 'Bearer token-a' }));
+  await quiet(() => state.restore());
+  assert.deepEqual(state.audit.slice(1).map(row => [row.action, row.detail.reason ?? null]), [
+    ['restore_preview', null], ['restore_stopped', 'request_hash_differs'], ['restore_denied', 'not_owner'], ['restore_note', null],
+  ]);
+  assert.equal(JSON.stringify(state.audit[0]), earlier); // 기존 감사 행은 그대로
+  for (const row of state.audit.slice(1)) {
+    assert.deepEqual(Object.keys(row).sort(), ['action', 'actor', 'detail', 'resource']);
+    assert.equal(row.resource, `note:${B_NOTE}`);
+    assert.equal(row.actor.length <= 8, true);
+  }
+  const all = JSON.stringify(state.audit.slice(1));
+  for (const secret of [ORIGINAL.body, ORIGINAL.title, '변조된 내용', 'token-b', B]) assert.equal(all.includes(secret), false, secret);
+  assert.equal(state.audit.length, 5);
+});
