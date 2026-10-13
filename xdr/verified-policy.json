@@ -1,0 +1,7 @@
+{
+  "schema": "aleph.xdr.verified-policy.v1",
+  "file": "xdr/deny-rules.json",
+  "commit": "e73192b",
+  "sha256": "cdd86f79653de2bdb90bcfef859a0337431c39af361035b31cea1e16a58306ec",
+  "note": "학생이 검증본으로 지정한 연습 거부 규칙 사본입니다. 해시는 사본이 바뀌지 않았다는 확인일 뿐 안전하다는 증명이 아닙니다."
+}
