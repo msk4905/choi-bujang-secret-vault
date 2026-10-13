@@ -67,3 +67,13 @@ test('step_up_required: 지역 하나, 두 조건뿐, 미등록 기기는 추가
   assert.equal(unreg.decision, 'deny');
   assert.equal(unreg.reasonCode, 'device_not_registered');
 });
+
+test('step_up_required: 형식이 틀린 stepUp은 재인증으로 인정하지 않음', async () => {
+  const { suspicious } = fixtureRequests();
+  for (const stepUp of [undefined, null, { verified: true, authAgeSeconds: null },
+    { verified: true, authAgeSeconds: -1 }, { verified: true, authAgeSeconds: '60' },
+    { verified: 'true', authAgeSeconds: 60 }, { verified: false, authAgeSeconds: 60 }]) {
+    assert.equal((await decide({ ...suspicious, stepUp })).decision, 'step_up');
+  }
+  assert.equal((await decide({ ...suspicious, stepUp: { verified: true, authAgeSeconds: 900 } })).decision, 'allow');
+});
