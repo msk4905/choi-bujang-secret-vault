@@ -2,6 +2,16 @@
 
 이 저장소는 1단계에서 학생 본인이 GitHub 저장소와 Vercel 배포를 만드는 출발점입니다. 포함된 메모 네 건은 가상 자료입니다. 실제 학생 자료, 토큰, 비밀키를 넣지 마세요.
 
+## 10단계 요약: 복구 경로와 재시험 (먼저 읽는 곳)
+
+- 복구 경로: `POST /api/notes/:id/restore` (`aleph.config.json`의 `restoreRoute`, `/aleph.json`의 `allowedRoutes`에도 있음). 로그인한 사용자의 토큰이 필요하고, 본문 없이 한 번 보내면 복구합니다.
+- 사본 일치 대조: 메모를 만들 때 서버가 제목·내용·내용 해시를 검증용 사본으로 남깁니다. 복구 때 사본을 다시 읽어 사본 행 위치(메모 ID·소유자), 사본 기록 안의 ID·소유자, 내용 해시를 모두 대조하고, 어긋나거나 사본이 없으면 쓰지 않고 멈춥니다(`404`·`409`). 쓴 뒤에는 사본과 되살린 행을 다시 읽어 같은지 확인하고 다르면 되돌립니다(`502`).
+- 실행 전 확인: 본문 `{"dryRun": true}`를 보내면 복원할 버전과 바뀔 항목만 돌려주고 아무것도 쓰지 않습니다.
+- 보존: 다른 메모와 사본, `xdr/alerts.log`는 지우거나 고치지 않습니다. 운영 정책에는 접근하지 않습니다. 시험 정책 사본(`xdr/deny-rules.json`)은 `npm run policy:diff`(차이만 보기)와 `npm run policy:restore`(미리보기와 확인 코드를 거친 되돌리기)로 다룹니다.
+- 복구 뒤 1~9단계 재시험: 순서와 칸별 결과는 아래 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서' 절에 있습니다. **2026-10-13 05:48 UTC에 배포 주소(당시 배포 커밋 `b21bf10`)로 실제로 보낸 것**: `/` HTTP 200, `/data.json`에 가상 메모 없음, `/aleph.json`에 시작 틀 확인 표시 없음, 토큰 없는 `GET·POST·PUT·DELETE /api/notes`는 `401`, 위조 토큰 `GET /api/notes`는 `401`, 토큰 없는 `POST /api/notes/:id/restore`는 `401`, 공개 키만으로 원본 자료 주소를 직접 요청하면 `401`. 로컬(가짜 DB·가상 요청, 심판 판정 아님): `node --test test/*.test.mjs` 96건 중 96건 통과, `decider:test` 여덟 줄 통과, `fixture:7` 정상 `allow`·복합 이상 `step_up`, `detect:test` 여섯 줄 통과.
+- **미실행(결과를 꾸미지 않음)**: 배포에서 A·B 로그인으로 하는 확인(4·8단계 교차 접근, 3단계 정상 메모 추가·수정·삭제, 복구 정상 호출과 거부), 5단계 ①~③, 6·7·9단계의 심판·엔진 몫(미등록 기기 공격, 재로그인 뒤 허용, 사건 전달과 접속 회수), 실제 DB에서 사본 저장이 되는지.
+- 한계: 이 변경 전에 만든 메모에는 사본이 없어 복구할 수 없고(`404`), 사본은 만들 때 한 번이라 정상 수정한 내용도 복구하면 처음 내용으로 돌아갑니다. 자세한 설명은 아래 '10단계 작업' 절에 있습니다.
+
 ## 학생이 하는 일: 세 걸음
 
 1. GitHub 계정을 만듭니다.
@@ -226,11 +236,11 @@
 
 | 단계 | 정상 요청 | 금지 요청 | 로컬 결과 | 배포 결과 |
 |---|---|---|---|---|
-| 1 공개 틀 | 배포 `/` 화면이 열림(`curl -s -o /dev/null -w "%{http_code}\n" https://<배포 주소>/`) | 1단계의 공개 가상 메모는 2단계부터 의도적으로 없앴으므로, 복구 뒤에도 `/data.json`이 `{ "notes": [] }`이어야 함 | `npm run build -- --local` 실행: 성공, `public/data.json` 변화 없음 | **미실행** |
-| 2 코드 밖으로 | `curl -s https://<배포 주소>/data.json` → `{ "notes": [] }` | `git grep -n "실습용 가상" -- . ':!README.md'` 출력 없음, 배포 `/data.json`에 같은 글자 `grep -c` 가 `0` | `git grep` 실행: 출력 없음(종료 코드 1) | `curl`: **미실행** |
-| 3 로그인 | A로 로그인해 메모 추가·수정·삭제, 로그아웃 뒤 목록이 사라짐 | 토큰 없는 `curl -s -o /dev/null -w "%{http_code}\n" https://<배포 주소>/api/notes` → `401`(POST·PUT·DELETE도 `401`) | `node --test test/notes-api.test.mjs test/r5.test.mjs` 포함 전체 실행: 통과 | A 로그인 화면 확인·`curl`: **미실행** |
+| 1 공개 틀 | 배포 `/` 화면이 열림(`curl -s -o /dev/null -w "%{http_code}\n" https://<배포 주소>/`) | 1단계의 공개 가상 메모는 2단계부터 의도적으로 없앴으므로, 복구 뒤에도 `/data.json`이 `{ "notes": [] }`이어야 함 | `npm run build -- --local` 실행: 성공, `public/data.json` 변화 없음 | `/` HTTP 200: 2026-10-13 05:48 UTC 실행 |
+| 2 코드 밖으로 | `curl -s https://<배포 주소>/data.json` → `{ "notes": [] }` | `git grep -n "실습용 가상" -- . ':!README.md'` 출력 없음, 배포 `/data.json`에 같은 글자 `grep -c` 가 `0` | `git grep` 실행: 출력 없음(종료 코드 1) | `/data.json` 가상 메모 없음·`/aleph.json` 시작 틀 표시 없음: 2026-10-13 05:48 UTC 실행(`attack-check`). `grep -c`: **미실행** |
+| 3 로그인 | A로 로그인해 메모 추가·수정·삭제, 로그아웃 뒤 목록이 사라짐 | 토큰 없는 `curl -s -o /dev/null -w "%{http_code}\n" https://<배포 주소>/api/notes` → `401`(POST·PUT·DELETE도 `401`) | `node --test test/notes-api.test.mjs test/r5.test.mjs` 포함 전체 실행: 통과 | 토큰 없는 GET·POST·PUT·DELETE `401`, 위조 토큰 GET `401`: 2026-10-13 05:48 UTC 실행. A 로그인 화면 확인: **미실행** |
 | 4 소유자 | 본인 토큰으로 본인 메모 `GET·PUT·DELETE /api/notes/<id>` 성공 | B 토큰(`$TOKEN_B`)으로 A의 메모 id 요청 → `404`, 소유자 변경 시도도 거부 | 전체 시험 통과(가짜 DB의 A·B 시험 포함) | A·B 두 계정 실제 확인: **미실행** |
-| 5 서버 함수로만 | 화면이 `/api/config`에서 공개 설정을 받아 로그인하고 자료는 `/api/notes`로만 읽음 | 공개 키(`apikey` 헤더)만으로 `aleph.config.json`의 `originalApiUrl`을 요청 → `401`·`403`(`200`이면 실패) | `node --test test/config-api.test.mjs test/r5.test.mjs` 포함 전체 실행: 통과 | 5단계 ①~④ 배포 확인: **미실행** |
+| 5 서버 함수로만 | 화면이 `/api/config`에서 공개 설정을 받아 로그인하고 자료는 `/api/notes`로만 읽음 | 공개 키(`apikey` 헤더)만으로 `aleph.config.json`의 `originalApiUrl`을 요청 → `401`·`403`(`200`이면 실패) | `node --test test/config-api.test.mjs test/r5.test.mjs` 포함 전체 실행: 통과 | ④ 공개 키로 원본 자료 주소 직접 요청 `401`: 2026-10-13 05:48 UTC 실행(`attack-check`). ①~③: **미실행** |
 | 6 등록 기기 | `npm run decider:test` 첫 줄 「통과 · 등록 기기의 정상 요청」(`allow`) | 「통과 · 미등록 기기의 가상 요청」(`deny`, `device_not_registered`) | 2026-10-13 04:57 UTC 실행: 여덟 줄 모두 「통과」 | 미등록 기기 실제 공격은 심판 몫: **미실행** |
 | 7 평소와 다른 접속 | `npm run fixture:7`의 정상 사건 `allow` | 복합 이상 사건 `step_up`, 다시 확인한 요청만 `allow`(`decider:test` 3·4번째 줄) | `fixture:7` 실행: 정상 `allow`, 복합 이상 `step_up` | 다시 로그인 전 자료 차단·새 로그인 뒤 허용: **미실행**(계약에 없음) |
 | 8 구역 | 자기 메모 한 건 경로(`GET·PUT /notes/:id`)만 허용(`decider:test` 5번째 줄 「메모 한 건 수정」) | 강사 공지 수정, `export` 경로, 쿼리가 붙은 요청 거부(`decider:test` 6~8번째 줄), 배포에서 B가 A의 id를 직접 요청 → `404` | `decider:test` 위 여덟 줄 통과, `node --test test/zones.test.mjs` 포함 전체 통과 | 배포 직접 요청: **미실행** |
@@ -258,7 +268,7 @@
 | 정책 복원 미리보기 | `npm run policy:restore` | 변경 범위와 확인 코드 표시, 파일 무변경 | 2026-10-13 (로컬) | 「되돌릴 것이 없습니다」(현재 파일이 검증본과 같음). 변경이 있는 경우는 임시 저장소 시험으로만 확인 |
 | 정책 복원 적용 | `npm run policy:restore -- --apply --confirm <코드>` | 검증본 모듈만 바뀌고 다른 모듈·기록 보존 | 미실행 | 미실행 (임시 저장소 시험 `node --test test/policy-restore.test.mjs`만 통과, 실제 파일에는 적용 안 함) |
 | 메모 한 건 복원 | B 토큰으로 `POST /api/notes/<id>/restore` | `verified: true`, 다른 메모 그대로 | 미실행 | 미실행 (가짜 DB 시험 `node --test test/notes-restore.test.mjs`만 통과) |
-| 복원 뒤 1~9단계 재확인 | 위 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서' | 정상은 통과, 금지는 거부 | 로컬만 2026-10-13 | 로컬 통과, 배포 미실행 |
+| 복원 뒤 1~9단계 재확인 | 위 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서' | 정상은 통과, 금지는 거부 | 로컬만 2026-10-13 | 로컬 통과. 배포는 토큰 없이 보낸 요청만 2026-10-13 05:48 UTC 실행(1·2·3·5단계 대표와 복구 경로 `401`), 로그인이 필요한 확인은 미실행 |
 
 ## 10단계 점검에서 고친 이전 단계 결함
 
