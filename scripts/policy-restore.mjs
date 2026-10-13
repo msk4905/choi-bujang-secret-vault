@@ -98,7 +98,14 @@ export function restore(root, { apply = false, confirm = null, now = Date.now() 
     renameSync(temp, target);
     const line = [new Date(now).toISOString(), 'restore', 'policy-restore', '-', 1,
       `검증본 ${loaded.commit}로 복원: 생김 ${plan.restore.length}, 사라짐 ${plan.remove.length}, 바뀜 ${plan.change.length} (모듈 ${plan.scope.join(' ')})`].join(' | ');
-    appendFileSync(logPath, `${logBefore && !logBefore.endsWith('\n') ? '\n' : ''}${line}\n`, 'utf8');
+    try {
+      appendFileSync(logPath, `${logBefore && !logBefore.endsWith('\n') ? '\n' : ''}${line}\n`, 'utf8');
+    } catch {
+      // 기록 없이 규칙만 바뀐 상태를 남기지 않도록, 방금 바꾼 규칙 파일을 읽어 둔 원래 내용으로 되돌립니다.
+      writeFileSync(temp, text, 'utf8');
+      renameSync(temp, target);
+      return { ok: false, applied: false, text: `중단: ${AUDIT_LOG}에 되돌림 기록을 쓰지 못해 ${POLICY_FILE}을 원래대로 되돌렸습니다. 기록 파일을 확인한 뒤 미리보기부터 다시 실행하세요.` };
+    }
     return { ok: true, applied: true, text: `${preview.split('\n').slice(0, -1).join('\n')}\n적용했습니다. 다시 확인: npm run policy:diff (영향받는 모듈 없음이어야 함)` };
   } catch (error) {
     if (error instanceof PolicyCopyError) return { ok: false, applied: false, text: `중단: ${error.message}\n아무것도 쓰지 않았습니다.` };

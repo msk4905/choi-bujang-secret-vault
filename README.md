@@ -147,7 +147,7 @@
 - 작동하는 것: `xdr/web-injection/decide.mjs`가 연습 경보 26건을 block 8·alert 9·record 9로 나눕니다. 패턴 근거는 `patterns.json`(MITRE T1190: 요청 인자 안의 SQL 구문·스크립트 태그·`../` 반복), 확인용 읽기는 `read-alerts.mjs`, 거부 규칙과 알림 기록은 `respond.mjs`가 `xdr/deny-rules.json`·`xdr/alerts.log`에 씁니다. `respond.mjs`는 brute-force 규칙을 건드리지 않고 `xdr.web-injection.` 규칙만 고칩니다.
 - 다시 실행: `npm run xdr:run -- web-injection`으로 `result.json`을 만들고, `node xdr/web-injection/respond.mjs`로 규칙·알림을 만듭니다. 연습 경보에 맞춘 로컬 결과이며 심판의 판정이 아닙니다.
 - 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없습니다.
-- 알아 둘 점: `decide.mjs`는 이름 있는 패턴 밖의 경보도 경보 자신의 T1190 표시와 반복 횟수로 판정합니다(명령 구분자 경보 1건이 block, 반복 없는 애매한 9건이 alert). `203.0.113.10`은 brute-force와 웹 주입 규칙이 둘 다 있어, `brute-force/respond.mjs`를 다시 실행하면 주소 기준 합치기 때문에 웹 주입 규칙 하나가 사라질 수 있습니다.
+- 알아 둘 점: `decide.mjs`는 이름 있는 패턴 밖의 경보도 경보 자신의 T1190 표시와 반복 횟수로 판정합니다(명령 구분자 경보 1건이 block, 반복 없는 애매한 9건이 alert). `203.0.113.10`은 brute-force와 웹 주입 규칙이 둘 다 있습니다. (옛 기록: `brute-force/respond.mjs`가 규칙 이름 접두어를 가리지 않아 다시 실행하면 웹 주입 규칙이 모두 사라졌고, 이는 아래 '10단계 점검에서 고친 이전 단계 결함'에서 고쳤습니다.)
 
 ## 6단계 저장점: 등록한 기기만 자료실에 들어옵니다
 
@@ -251,3 +251,29 @@ revoke all on public.notes_backup from public, anon, authenticated;
 - 전체 코드 시험: `npm ci` 뒤 `node --test test/*.test.mjs`. 2026-10-13 04:57 UTC에 85건 중 85건 통과, 실패 0건이었습니다. 이 시험은 위 로컬 열의 근거이며 배포나 심판 결과가 아닙니다.
 - `npm run bundle`은 배포 주소로 토큰 없는 GET·POST·PUT·DELETE와 위조 토큰 요청을 실제로 보내 상태 코드만 기록하는 자기 점검(`src/attack-check.mjs`)을 포함하고, 변경을 모두 커밋한 뒤에만 실행합니다. 이번 복구 뒤에는 **미실행**입니다. 이 점검은 A·B 로그인 요청을 보내지 않아 4·6·8·9단계 항목은 계속 「미실행」으로 남습니다.
 - 한 곳이라도 정상 요청이 거부되거나 금지 요청이 통과하면 거기서 멈추고, 그 줄의 첫 출력과 이번에 바뀐 파일만 근거로 한 가지만 고칩니다.
+
+## 정책 사본 되돌리기: `policy:diff`와 `policy:restore` (10단계)
+
+- 대상: 연습 거부 규칙 파일 `xdr/deny-rules.json`(보너스 1·2의 `xdr.brute-force.`·`xdr.web-injection.` 규칙)뿐입니다. 판정기(`src/decider.mjs`)와 `/api/notes`에는 연결되어 있지 않으며 운영 정책에는 접근하지 않습니다.
+- 검증본: `xdr/verified-policy.json`이 Git 커밋(`e73192b`)의 사본과 sha256을 가리킵니다. 해시는 사본이 바뀌지 않았다는 확인일 뿐 안전하다는 증명이 아닙니다. 이 커밋을 검증본으로 지정한 판단은 학생이 해야 하며, 저는 직접 검증하지 못했습니다.
+- `npm run policy:diff`: 검증본과 현재 파일의 차이만 보여 줍니다(다시 생길·사라질·바뀔 규칙과 영향받는 모듈). 파일을 쓰지 않으며, 기록 파일이 없거나 커밋·해시·형식 검증에 실패하면 차이를 보여 주지 않고 중단합니다(종료 코드 1).
+- `npm run policy:restore`: 기본은 같은 내용의 미리보기와 12자리 확인 코드만 보여 주고 아무것도 쓰지 않습니다. 목록이 맞으면 `npm run policy:restore -- --apply --confirm <코드>`로 적용합니다. 그 사이 파일이 바뀌면 코드가 달라져 중단됩니다. 되돌리는 범위는 검증본에 들어 있는 모듈의 규칙뿐이고, 다른 모듈 규칙은 그대로 두며, `xdr/alerts.log`는 기존 줄을 지우지 않고 `restore` 기록 한 줄만 덧붙입니다. 기록을 쓰지 못하면 규칙 파일을 원래대로 되돌리고 중단합니다.
+- 알아 둘 점: 검증본 규칙의 만료 시각(2026-10-11)은 이미 지났습니다. 복원해도 만료된 규칙은 맞지 않으며, 미리보기가 그 개수를 알려 줍니다. 아직 실제 `xdr/deny-rules.json`에는 적용하지 않았습니다(현재 파일이 검증본과 같아 `policy:diff`가 차이 없음).
+
+## 복원 시험 기록 (결과를 꾸미지 않고 직접 채우는 칸)
+
+백업은 실제로 되살려 본 것만 믿습니다. 아래 칸은 실제로 실행한 뒤 날짜와 첫 오류를 적습니다. 실행하지 않은 칸은 미실행으로 둡니다.
+
+| 시험 | 명령·행동 | 정상 | 실행 날짜·시각 | 결과 |
+|---|---|---|---|---|
+| 정책 사본 비교 | `npm run policy:diff` | 차이 없음 또는 변경 범위 표시 | 2026-10-13 (로컬) | 차이 없음(규칙 16개) |
+| 정책 복원 미리보기 | `npm run policy:restore` | 변경 범위와 확인 코드 표시, 파일 무변경 | 2026-10-13 (로컬) | 「되돌릴 것이 없습니다」(현재 파일이 검증본과 같음). 변경이 있는 경우는 임시 저장소 시험으로만 확인 |
+| 정책 복원 적용 | `npm run policy:restore -- --apply --confirm <코드>` | 검증본 모듈만 바뀌고 다른 모듈·기록 보존 | 미실행 | 미실행 (임시 저장소 시험 `node --test test/policy-restore.test.mjs`만 통과, 실제 파일에는 적용 안 함) |
+| 메모 한 건 복원 | B 토큰으로 `POST /api/notes/<id>/restore` | `verified: true`, 다른 메모 그대로 | 미실행 | 미실행 (가짜 DB 시험 `node --test test/notes-restore.test.mjs`만 통과) |
+| 복원 뒤 1~9단계 재확인 | 위 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서' | 정상은 통과, 금지는 거부 | 로컬만 2026-10-13 | 로컬 통과, 배포 미실행 |
+
+## 10단계 점검에서 고친 이전 단계 결함
+
+- 보너스 1 `xdr/brute-force/respond.mjs`: 규칙을 합칠 때 규칙 이름 접두어를 가리지 않아, 다시 실행하면 같은 파일의 웹 주입 규칙까지 모두 지우던 결함을 고쳤습니다. 수정 전 코드를 임시 폴더 복사본에서 돌렸더니 규칙이 16개에서 9개로 줄고 웹 주입 규칙 7개가 사라졌습니다. 이제 `xdr.brute-force.deny.` 규칙만 고치고 다른 모듈 규칙은 만료된 것도 그대로 둡니다. 시험은 `node --test test/xdr-respond-merge.test.mjs`(임시 폴더만 씀)입니다. 이미 사라진 규칙은 이 수정으로 돌아오지 않습니다(필요하면 `npm run xdr:run -- web-injection` 뒤 `node xdr/web-injection/respond.mjs`).
+- `package/POLICIES.md`: 6~8단계에서 비워 둔 규칙 표를 실제로 구현한 규칙과 확인 방법으로 채웠습니다(확인은 로컬 시험이며 배포·심판 결과가 아님).
+- `src/attack-check.mjs`: `step`이 10일 때 토큰 없는 `POST /api/notes/:id/restore`가 `401`인지 보내 보는 점검과, A·B 로그인이 필요한 복원 점검 두 개(미실행)를 더했습니다. `aleph.config.json`의 `step`은 아직 9이므로 지금은 실행되지 않습니다. 단계를 10으로 올릴 때 `build-public.mjs`·`deployment-identity.mjs`의 단계 목록과 `test/r5.test.mjs`의 '지원하지 않는 단계' 시험도 함께 옮겨야 합니다.

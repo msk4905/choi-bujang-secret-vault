@@ -12,6 +12,7 @@ const RULES_FILE = join(root, 'xdr', 'deny-rules.json');
 const ALERT_LOG = join(root, 'xdr', 'alerts.log');
 const RULE_TTL_MS = 60 * 60 * 1000;
 const SCHEMA = 'aleph.xdr.deny-rules.v1';
+const RULE_PREFIX = 'xdr.brute-force.deny.';
 
 const IPV4 = /^(?:\d{1,3}\.){3}\d{1,3}$/u;
 
@@ -60,19 +61,23 @@ export function findDenyRule(rules, srcip, now = Date.now()) {
   return rules.find((rule) => rule.srcip === srcip && Date.parse(rule.expiresAt) > now) ?? null;
 }
 
-async function loadRules() {
+async function loadRules(rulesFile) {
   try {
-    const stored = JSON.parse(await readFile(RULES_FILE, 'utf8'));
+    const stored = JSON.parse(await readFile(rulesFile, 'utf8'));
     return Array.isArray(stored.rules) ? stored.rules : [];
   } catch {
     return [];
   }
 }
 
-// 이미 저장된 규칙은 유지하되 만료된 것은 버리고, 같은 주소는 근거 경보를 합칩니다.
+// 규칙 파일은 웹 주입 규칙과 같이 쓰므로, 규칙 이름(ruleId)이 xdr.brute-force.deny. 로 시작하는 것만 고칩니다.
+// 다른 모듈의 규칙은 같은 주소여도 만료 여부와 상관없이 그대로 둡니다. 내 규칙은 만료된 것을 버리고 같은 주소는 근거 경보를 합칩니다.
+const isMine = (rule) => typeof rule?.ruleId === 'string' && rule.ruleId.startsWith(RULE_PREFIX);
+
 function mergeRules(stored, fresh, now) {
+  const others = stored.filter((rule) => !isMine(rule));
   const merged = new Map();
-  for (const rule of stored) {
+  for (const rule of stored.filter(isMine)) {
     if (Date.parse(rule.expiresAt) > now) merged.set(rule.srcip, rule);
   }
   for (const rule of fresh) {
@@ -82,7 +87,7 @@ function mergeRules(stored, fresh, now) {
     old.expiresAt = rule.expiresAt;
     if (rule.confidence > old.confidence) { old.confidence = rule.confidence; old.reason = rule.reason; }
   }
-  return [...merged.values()];
+  return [...others, ...merged.values()];
 }
 
 function logLine(alert, result) {
@@ -107,12 +112,12 @@ export async function writeAlertLog(alerts, logPath = ALERT_LOG) {
   return lines.length;
 }
 
-export async function respond(alerts, now = Date.now()) {
+export async function respond(alerts, now = Date.now(), { rulesFile = RULES_FILE, logFile = ALERT_LOG } = {}) {
   const { rules, skipped } = buildDenyRules(alerts, now);
-  const merged = mergeRules(await loadRules(), rules, now);
-  await mkdir(dirname(RULES_FILE), { recursive: true });
-  await writeFile(RULES_FILE, `${JSON.stringify({ schema: SCHEMA, rules: merged }, null, 2)}\n`, 'utf8');
-  const logged = await writeAlertLog(alerts);
+  const merged = mergeRules(await loadRules(rulesFile), rules, now);
+  await mkdir(dirname(rulesFile), { recursive: true });
+  await writeFile(rulesFile, `${JSON.stringify({ schema: SCHEMA, rules: merged }, null, 2)}\n`, 'utf8');
+  const logged = await writeAlertLog(alerts, logFile);
   return { rules: merged, skipped, logged };
 }
 

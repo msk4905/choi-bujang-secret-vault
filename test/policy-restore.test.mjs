@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { restore } from '../scripts/policy-restore.mjs';
@@ -122,4 +122,16 @@ test('이미 만료된 검증본 규칙은 미리보기에서 알려 준다', ()
   const root = setup({ current: policy([OTHER]) });
   const result = restore(root, { now: NOW + 2 * 3600e3 });
   assert.match(result.text, /이미 만료 시각이 지났습니다/u);
+});
+
+test('감사 기록을 쓰지 못하면 규칙 파일을 원래대로 되돌리고 중단한다', () => {
+  const root = setup();
+  const code = codeOf(restore(root, { now: NOW }).text);
+  rmSync(join(root, 'xdr/alerts.log'));
+  mkdirSync(join(root, 'xdr/alerts.log')); // 파일이 아니라 폴더라 덧붙이기가 실패한다
+  const result = restore(root, { apply: true, confirm: code, now: NOW });
+  assert.equal(result.ok, false);
+  assert.match(result.text, /^중단: .*원래대로 되돌렸습니다/u);
+  assert.equal(read(root, 'xdr/deny-rules.json'), CURRENT);
+  assert.equal(existsSync(join(root, 'xdr/deny-rules.json.restore-tmp')), false);
 });
