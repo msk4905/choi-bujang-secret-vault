@@ -13,7 +13,9 @@ const B_OTHER = '44444444-4444-4444-8444-444444444442';
 const A_NOTE = '55555555-5555-4555-8555-555555555551';
 const people = { 'Bearer token-a': { userId: A }, 'Bearer token-b': { userId: B } };
 
-function fakeDb(tables, writes, { dropWrites = false } = {}) {
+function fakeDb(tables, writes, { dropWrites = false, corruptWrites = false, onWrite = null } = {}) {
+  let firstWrite = true; // 변조·끼어들기는 첫 쓰기에만 적용한다
+  const once = () => { const first = firstWrite; firstWrite = false; return first; };
   return {
     from(name) {
       const rows = tables[name];
@@ -24,7 +26,14 @@ function fakeDb(tables, writes, { dropWrites = false } = {}) {
         const hit = rows.filter(row => filters.every(([k, v]) => row[k] === v));
         if (action === 'select') return hit.map(row => ({ ...row }));
         writes.push([name, action]);
-        if (action === 'update') { if (!dropWrites) hit.forEach(row => Object.assign(row, patch)); return hit.map(row => ({ id: row.id, owner_id: row.owner_id })); }
+        if (action === 'update') {
+          if (!dropWrites) hit.forEach(row => Object.assign(row, patch));
+          if (once()) {
+            if (corruptWrites) hit.forEach(row => { row.content += '(변조)'; });
+            if (onWrite) onWrite();
+          }
+          return hit.map(row => ({ id: row.id, owner_id: row.owner_id }));
+        }
         for (const row of hit) rows.splice(rows.indexOf(row), 1);
         return hit.map(row => ({ id: row.id }));
       };
@@ -38,6 +47,10 @@ function fakeDb(tables, writes, { dropWrites = false } = {}) {
           writes.push([name, 'insert']);
           if (rows.some(item => item.id === row.id)) return Promise.resolve({ error: { code: '23505' } });
           if (!dropWrites) rows.push({ ...row });
+          if (once()) {
+            if (corruptWrites) rows[rows.length - 1].content += '(변조)';
+            if (onWrite) onWrite();
+          }
           return Promise.resolve({ error: null });
         },
         maybeSingle: async () => ({ data: run()[0] ?? null, error: null }),
@@ -193,4 +206,33 @@ test('vercel.json 주소 변환과 허용 경로가 구현과 맞다', () => {
   assert.equal(vercel.rewrites.find(item => item.source === '/api/notes/:id/restore').destination, '/api/notes?id=:id&restore=1');
   assert.ok(config.allowedRoutes.includes('POST /api/notes/:id/restore'));
   assert.equal(config.restoreRoute, 'POST /api/notes/:id/restore');
+});
+
+test('복원 뒤 검증에 실패하면 쓴 내용을 되돌린다: 새로 만든 행은 지운다', async () => {
+  const { tables, call, hash } = setup({ corruptWrites: true });
+  const before = snapshot(tables.notes);
+  const [result, logged] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash } }));
+  assert.deepEqual([result.code, result.json], [502, { error: 'RESTORE_UNVERIFIED' }]);
+  assert.equal(snapshot(tables.notes), before);
+  assert.ok(logged.some(line => line.includes('notes restore unverified')));
+  for (const secret of [B_NOTE, A, B, hash, '변조']) assert.equal(logged.join('\n').includes(secret), false);
+});
+
+test('복원 뒤 검증에 실패하면 쓴 내용을 되돌린다: 고친 행은 이전 내용으로 돌린다', async () => {
+  const { tables, call, hash } = setup({ corruptWrites: true });
+  tables.notes.push(note(B_NOTE, B, '고친 제목', '고친 내용'));
+  const before = snapshot(tables.notes);
+  const [result] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash } }));
+  assert.deepEqual([result.code, result.json], [502, { error: 'RESTORE_UNVERIFIED' }]);
+  assert.equal(snapshot(tables.notes), before);
+});
+
+test('쓰는 사이 사본이 바뀌면 사본을 다시 읽어 알아채고 되돌린다', async () => {
+  let tables;
+  const state = setup({ onWrite: () => { tables.notes_backup[0].content = '사이에 바뀐 사본'; } });
+  tables = state.tables;
+  const before = snapshot(tables.notes);
+  const [result] = await quiet(() => state.call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: state.hash } }));
+  assert.deepEqual([result.code, result.json], [502, { error: 'RESTORE_UNVERIFIED' }]);
+  assert.equal(snapshot(tables.notes), before);
 });

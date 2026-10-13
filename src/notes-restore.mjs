@@ -1,7 +1,7 @@
 // 비공개 가상 메모 사본(notes_backup)에서 지정한 메모 한 건만 notes로 되살립니다. POST /api/notes/:id/restore
 // 사본은 서버 전용 키로만 읽습니다. 사용자·소유자는 서버가 확인한 로그인 결과만 쓰고 본문·헤더·쿼리의 값은 읽지 않습니다.
 // 복원 전: 사본의 id·owner_id가 요청한 id·확인된 사용자와 같은지, 사본 내용의 해시가 사본에 적힌 해시와 요청이 말한 해시와 같은지 대조합니다.
-// 복원 후: 되살린 행을 다시 읽어 id·owner_id·내용 해시가 사본과 같은지 확인합니다.
+// 복원 후: 사본과 되살린 행을 새로 읽어 id·owner_id·내용 해시가 같은지 확인하고, 다르면 쓴 내용을 되돌립니다.
 // 다른 메모와 사본 표는 고치지 않습니다. 감사 기록은 따로 만들지 않고 서버 로그에 짧은 코드만 남깁니다(ID·본문·토큰 없음).
 import { createHash } from 'node:crypto';
 
@@ -54,6 +54,8 @@ export async function restoreNote({ db, principal, id, input }) {
     return { code: 200, json: { id, restored: 'unchanged', verified: true } };
   }
 
+  // 쓰기 전 상태를 기억해 둡니다. 복원 뒤 검증에 실패하면 이 상태로 되돌립니다.
+  const previous = live ? { title: live.title, content: live.content } : null;
   let mode;
   if (live) {
     const { data, error } = await db.from('notes').update({ title: backup.title, content: backup.content })
@@ -70,13 +72,35 @@ export async function restoreNote({ db, principal, id, input }) {
     mode = 'created';
   }
 
-  const { data: after, error: afterError } = await db.from('notes')
-    .select('id, title, content, owner_id').eq('id', id).maybeSingle();
-  if (afterError) throw afterError;
-  if (!after || after.id !== backup.id || after.owner_id !== backup.owner_id || noteHash(after.title, after.content) !== hash) {
+  if (!await verifiedAfterWrite(db, principal, id, hash)) {
+    await rollback(db, principal, id, previous);
     console.error('notes restore unverified');
     return { code: 502, json: { error: 'RESTORE_UNVERIFIED' } };
   }
   console.info(`notes restored: ${mode}`);
   return { code: mode === 'created' ? 201 : 200, json: { id, restored: mode, verified: true } };
+}
+
+// 쓴 뒤에는 사본과 되살린 행을 둘 다 새로 읽어 ID·소유자·내용 해시를 확인합니다. 읽기 오류도 검증 실패로 봅니다.
+async function verifiedAfterWrite(db, principal, id, hash) {
+  try {
+    const { data: fresh, error: freshError } = await db.from('notes_backup')
+      .select('id, owner_id, title, content, content_sha256').eq('id', id).maybeSingle();
+    const { data: after, error: afterError } = await db.from('notes')
+      .select('id, title, content, owner_id').eq('id', id).maybeSingle();
+    if (freshError || afterError || !fresh || !after) return false;
+    return fresh.id === id && fresh.owner_id === principal.userId
+      && fresh.content_sha256 === hash && noteHash(fresh.title, fresh.content) === hash
+      && after.id === fresh.id && after.owner_id === fresh.owner_id && noteHash(after.title, after.content) === hash;
+  } catch { return false; }
+}
+
+// 검증에 실패한 복원은 쓴 내용을 없던 일로 합니다: 새로 만든 행은 지우고, 고친 행은 이전 제목·내용으로 돌립니다.
+async function rollback(db, principal, id, previous) {
+  try {
+    const { error } = previous
+      ? await db.from('notes').update(previous).eq('id', id).eq('owner_id', principal.userId)
+      : await db.from('notes').delete().eq('id', id).eq('owner_id', principal.userId);
+    if (error) throw error;
+  } catch { console.error('notes restore rollback failed'); }
 }
