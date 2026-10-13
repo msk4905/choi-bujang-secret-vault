@@ -38,3 +38,32 @@ test('판정 결과는 이번 변경으로 달라지지 않습니다', async () 
   assert.equal((await decide(normal)).decision, 'allow');
   assert.equal((await decide({ ...normal, deviceRegistered: false })).decision, 'deny');
 });
+
+test('step_up_required: 복합 사건만 추가 확인, 정상은 허용', async () => {
+  const { normal, suspicious } = fixtureRequests();
+  const out = await decide(suspicious);
+  assert.equal(out.decision, 'step_up');
+  assert.equal(out.reasonCode, 'step_up_required');
+  assert.deepEqual(out.ruleIds, ['step_up_required']);
+  assert.equal((await decide(normal)).decision, 'allow');
+  const again = await decide({ ...suspicious, stepUp: { verified: true, authAgeSeconds: 60 } });
+  assert.equal(again.decision, 'allow');
+  const stale = await decide({ ...suspicious, stepUp: { verified: true, authAgeSeconds: 901 } });
+  assert.equal(stale.decision, 'step_up');
+});
+
+test('step_up_required: 지역 하나, 두 조건뿐, 미등록 기기는 추가 확인이 아님', async () => {
+  const { normal, suspicious } = fixtureRequests();
+  const foreignOnly = { ...normal, signals: { ...normal.signals, region: 'foreign' } };
+  assert.equal((await decide(foreignOnly)).decision, 'allow');
+  for (const patch of [{ signals: { ...suspicious.signals, hour: 14 } },
+    { signals: { ...suspicious.signals, network: 'usual' } }, { recentEvents: [] },
+    { recentEvents: [{ kind: 'risk_signal', ageSeconds: 60, count: 9 }] },
+    { recentEvents: [{ kind: 'risk_signal', ageSeconds: 601, count: 20 }] },
+    { signals: { source: 'none', region: 'unknown', network: 'unknown', hour: 3 } }]) {
+    assert.equal((await decide({ ...suspicious, ...patch })).decision, 'allow');
+  }
+  const unreg = await decide({ ...suspicious, deviceRegistered: false });
+  assert.equal(unreg.decision, 'deny');
+  assert.equal(unreg.reasonCode, 'device_not_registered');
+});

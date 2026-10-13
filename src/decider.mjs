@@ -1,7 +1,7 @@
 // ALEPH SDP 엔진이 확인한 요청만 받는 학생 판정기 시작점입니다.
 // 6단계부터 규칙을 하나씩 추가합니다. 규칙에 걸리지 않은 요청은 모두 거부합니다.
 // 요청 본문의 userId, role, 기기 키, 토큰을 별도로 믿거나 저장하지 마세요.
-export const RULE_IDS = Object.freeze(['starter.deny', 'device_registered']);
+export const RULE_IDS = Object.freeze(['starter.deny', 'device_registered', 'step_up_required']);
 
 // 엔진이 넘긴 request.signals의 출처를 구분합니다. 판정은 바꾸지 않고 입력만 읽습니다.
 // 계약에 있는 출처는 'none'(실제 경로)과 'judge_fixture'(연습용)뿐이며, 둘 다 실제 위치 증거가 아닙니다.
@@ -27,9 +27,55 @@ export function readSignals(request) {
   };
 }
 
+// step_up_required: 평소와 다른 시각 + 처음 보는 네트워크 + 최근 대량 조회, 세 가지가 함께일 때만 추가 확인을 요청합니다.
+// 지역(region)은 판정에 쓰지 않으므로 지역 하나만으로는 거부·추가 확인 어느 쪽도 되지 않습니다.
+// 기준값은 연습 자료에 맞춘 가정입니다: 새벽 0~5시, network === 'unusual', risk_signal 합계 10건 이상(최근 10분).
+const UNUSUAL_HOURS = Object.freeze([0, 1, 2, 3, 4, 5]);
+const BURST_KIND = 'risk_signal';
+const BURST_MIN_COUNT = 10;
+const BURST_WINDOW_SECONDS = 600;
+
+function burstCount(request) {
+  if (!Array.isArray(request?.recentEvents)) return 0;
+  return request.recentEvents.reduce((sum, event) => (
+    event && event.kind === BURST_KIND && Number.isInteger(event.count) && event.count > 0
+      && Number.isInteger(event.ageSeconds) && event.ageSeconds >= 0
+      && event.ageSeconds <= BURST_WINDOW_SECONDS ? sum + event.count : sum), 0);
+}
+
+function isUnusualAccess(request) {
+  const signals = readSignals(request);
+  return UNUSUAL_HOURS.includes(signals.hour) && signals.network === 'unusual'
+    && burstCount(request) >= BURST_MIN_COUNT;
+}
+
+function recentlyVerified(request) {
+  const step = request?.stepUp;
+  return step?.verified === true && Number.isInteger(step.authAgeSeconds)
+    && step.authAgeSeconds >= 0 && step.authAgeSeconds <= 900;
+}
+
 export async function decide(request) {
   // 등록 기기(deviceRegistered === true)일 때만 허용합니다. false나 값 없음은 거부합니다.
   if (request?.deviceRegistered === true) {
+    if (isUnusualAccess(request) && !recentlyVerified(request)) {
+      return {
+        schema: 'aleph.decision.v1',
+        requestId: request.requestId,
+        decision: 'step_up',
+        reasonCode: 'step_up_required',
+        ruleIds: ['step_up_required'],
+      };
+    }
+    if (isUnusualAccess(request)) {
+      return {
+        schema: 'aleph.decision.v1',
+        requestId: request.requestId,
+        decision: 'allow',
+        reasonCode: 'approved',
+        ruleIds: ['step_up_required'],
+      };
+    }
     return {
       schema: 'aleph.decision.v1',
       requestId: request.requestId,
