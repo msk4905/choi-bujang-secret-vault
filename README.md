@@ -12,7 +12,7 @@
 - 복구 뒤 1~9단계 재시험: 순서와 칸별 결과는 아래 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서' 절에 있습니다. **2026-10-13 05:48 UTC에 배포 주소(당시 배포 커밋 `b21bf10`)로 실제로 보낸 것**: `/` HTTP 200, `/data.json`에 가상 메모 없음, `/aleph.json`에 시작 틀 확인 표시 없음, 토큰 없는 `GET·POST·PUT·DELETE /api/notes`는 `401`, 위조 토큰 `GET /api/notes`는 `401`, 토큰 없는 `POST /api/restore/:id`는 `401`, 공개 키만으로 원본 자료 주소를 직접 요청하면 `401`. 로컬(가짜 DB·가상 요청, 심판 판정 아님): `node --test test/*.test.mjs` 96건 중 96건 통과, `decider:test` 여덟 줄 통과, `fixture:7` 정상 `allow`·복합 이상 `step_up`, `detect:test` 여섯 줄 통과.
 - **미실행(결과를 꾸미지 않음)**: 배포에서 A·B 로그인으로 하는 확인(4·8단계 교차 접근, 3단계 정상 메모 추가·수정·삭제, 복구 정상 호출과 거부), 5단계 ①~③, 6·7·9단계의 심판·엔진 몫(미등록 기기 공격, 재로그인 뒤 허용, 사건 전달과 접속 회수), 실제 DB에서 사본 저장이 되는지.
 - 한계: 사본이 없던 옛 메모는 처음 수정하거나 지우기 **전에** 이미 변조되었다면 되돌릴 사본이 없어 복구할 수 없습니다(`404`). 사본은 처음 한 번만 남으므로 그 뒤 정상 수정한 내용도 복구하면 사본 시점의 내용으로 돌아갑니다. 자세한 설명은 아래 '10단계 작업' 절에 있습니다.
-- 감사 기록 보존: 복구 요청의 결과(성공 `restore_note`, 미리보기 `restore_preview`, 거부 `restore_denied`, 중단 `restore_stopped`)마다 감사 표 `vault_audit`에 한 줄(행동·자원 ID·요청자 앞 8자리·짧은 사유)을 덧붙입니다. 코드는 이 표에 INSERT만 하고(`api/restore/[id].js`의 `appendAudit`) 기존 행을 읽거나 고치거나 지우지 않으며, `supabase/step10-backup.sql`이 서버 키의 UPDATE·DELETE 권한과 anon·authenticated의 모든 권한을 회수합니다. 복구는 요청한 메모 한 건(`id`와 `owner_id` 조건)만 쓰고, 다른 메모·감사 행·다른 서비스 규칙(`xdr`의 다른 모듈 규칙)은 건드리지 않습니다. 실제 DB에서 `select action, resource, actor from vault_audit order by id desc limit 5;`로 확인했고(셀프체크 뒤 `restore_note` 두 줄), 사본을 일부러 변조했을 때 멈추는 경우는 가짜 DB 시험만 했습니다.
+- 감사 기록 보존: 복구 요청의 결과(성공 `restore_note`, 미리보기 `restore_preview`, 거부 `restore_denied`, 중단 `restore_stopped`)마다 감사 표 `vault_audit`에 한 줄(행동·자원 ID·요청자 앞 8자리·짧은 사유)을 덧붙입니다. 코드는 이 표에 INSERT만 하고(`api/restore/[id].js`의 `appendAudit`) 기존 행을 읽거나 고치거나 지우지 않으며, `supabase/step10-backup.sql`이 서버 키의 UPDATE·DELETE 권한과 anon·authenticated의 모든 권한을 회수합니다. 복구는 요청한 메모 한 건(`id`와 `owner_id` 조건)만 쓰고, 다른 메모·감사 행·다른 서비스 규칙(`xdr`의 다른 모듈 규칙)은 건드리지 않습니다. 실제 DB에서 `select action, resource, actor from vault_audit order by id desc limit 5;`로 확인했습니다(셀프체크 뒤 `restore_note` 두 줄). 실제 DB에서 사본을 일부러 변조해 보는 확인은 `npm run restore:tamper-check`로 하며 결과는 아래 '복원 시험 기록'에 적습니다.
 
 ## 학생이 하는 일: 세 걸음
 
@@ -259,7 +259,7 @@
 - 용도: 배포된 사이트에서 복구 경로가 처음부터 끝까지 동작하는지 시험 계정으로 직접 확인합니다. 메모 만들기 → 변조 → 복구 미리보기(`dryRun`, 쓰지 않음) → 복구(본문 없음) → 처음 내용 확인 → 틀린 해시 거부 → 지우기 → 지운 뒤 복구 → 로그인 없는 복구 거부 → 사본 없는 메모 거부, 13단계입니다. 각 단계의 상태 코드와 걸린 시간만 출력하고, 토큰과 메모 내용은 출력하지 않습니다.
 - 실행: 시험 계정으로 앱에 로그인한 뒤 그 계정의 토큰을 터미널에서 화면에 보이지 않게 입력하고(`read -rs ALEPH_TEST_TOKEN && export ALEPH_TEST_TOKEN`) `npm run restore:selfcheck`를 실행합니다. 토큰을 파일·Git·대화에 붙이지 마세요. 시험용 메모는 끝에 지우지만, 서버가 남긴 사본 한 건은 API로 지울 수 없어 사본 표에 남습니다.
 - 정상: 13단계가 모두 「통과」이고 요약이 `13/13`입니다. 거부되어야 할 결과: 하나라도 「실패」이면 첫 실패 단계 이름을 알려 줍니다.
-- 이 스크립트는 코드 시험(`node --test test/restore-selfcheck.test.mjs`, 로컬 가짜 서버)으로만 확인했습니다. 실제 배포에서의 실행은 **미실행**입니다.
+- 이 스크립트는 코드 시험(`node --test test/restore-selfcheck.test.mjs`, 로컬 가짜 서버)과, 학생이 2026-10-13에 시험 계정 토큰으로 배포 주소에서 실제로 실행한 것(13/13 통과, 학생 보고)으로 확인했습니다. 사본·감사 표를 만든 뒤(`supabase/step10-backup.sql` 실행) 배포 커밋 `3c28288`에서도 13/13이 나왔습니다.
 
 ## 정책 사본 되돌리기: `policy:diff`와 `policy:restore` (10단계)
 
@@ -278,8 +278,9 @@
 | 정책 사본 비교 | `npm run policy:diff` | 차이 없음 또는 변경 범위 표시 | 2026-10-13 (로컬) | 차이 없음(규칙 16개) |
 | 정책 복원 미리보기 | `npm run policy:restore` | 변경 범위와 확인 코드 표시, 파일 무변경 | 2026-10-13 (로컬) | 「되돌릴 것이 없습니다」(현재 파일이 검증본과 같음). 변경이 있는 경우는 임시 저장소 시험으로만 확인 |
 | 정책 복원 적용 | `npm run policy:restore -- --apply --confirm <코드>` | 검증본 모듈만 바뀌고 다른 모듈·기록 보존 | 미실행 | 미실행 (임시 저장소 시험 `node --test test/policy-restore.test.mjs`만 통과, 실제 파일에는 적용 안 함) |
-| 배포에서 복구 경로 전체 자체 시험 | `npm run restore:selfcheck` (시험 계정 토큰 필요) | 13단계 모두 통과 | 미실행 | 미실행 (로컬 가짜 서버 시험만 통과) |
-| 메모 한 건 복원 | B 토큰으로 `POST /api/restore/<id>` | `verified: true`, 다른 메모 그대로 | 미실행 | 미실행 (가짜 DB 시험 `node --test test/notes-restore.test.mjs`만 통과) |
+| 배포에서 복구 경로 전체 자체 시험 | `npm run restore:selfcheck` (시험 계정 토큰 필요) | 13단계 모두 통과 | 2026-10-13 (학생이 배포 주소에서 실행, 커밋 `3c28288`) | 13/13 통과(학생 보고, 가장 느린 호출 약 3.7초) |
+| 메모 한 건 복원 | B 토큰으로 `POST /api/restore/<id>` (selfcheck 6·10단계) | `verified: true`, 다른 메모 그대로 | 2026-10-13 (학생, 실제 배포·DB) | 변조 뒤 복구 `200`, 지운 뒤 복구 `201`, 틀린 해시 `409`, 로그인 없음 `401`, 사본 없는 메모 `404`. Supabase에서 `vault_audit`에 `restore_note` 두 줄을 확인(학생 캡처). 다른 메모를 쓰지 않는 것은 코드 조건(`id`+`owner_id`)과 가짜 DB 시험으로만 확인 |
+| 사본을 변조했을 때 복구가 멈춤(실제 DB) | `npm run restore:tamper-check -- create` → Supabase에서 안내된 SQL로 사본 내용만 변경 → `-- check <id>` | `409 BACKUP_HASH_MISMATCH`, 메모는 쓰이지 않음 | **미실행** | 미실행 (가짜 DB 시험 `node --test test/notes-restore.test.mjs`만 통과) |
 | 복원 뒤 1~9단계 재확인 | 위 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서' | 정상은 통과, 금지는 거부 | 로컬만 2026-10-13 | 로컬 통과. 배포는 토큰 없이 보낸 요청만 2026-10-13 05:48 UTC 실행(1·2·3·5단계 대표와 복구 경로 `401`), 로그인이 필요한 확인은 미실행 |
 
 ## 10단계 점검에서 고친 이전 단계 결함
@@ -293,7 +294,7 @@
 - 작동하는 것(코드 시험 기준): ① 메모를 만들 때(사본이 없던 옛 메모는 처음 수정·삭제 직전에) 서버가 검증용 사본을 남기고, `POST /api/restore/:id`가 본문 없이 한 번 호출돼도 사본을 다시 읽어 ID·소유자·내용 해시를 대조한 뒤 메모 한 건만 되살리며(`dryRun`으로 실행 전에 버전과 바뀔 항목 확인), 복원 뒤 사본과 되살린 행을 새로 읽어 확인하며 어긋나면 쓴 내용을 되돌립니다(다른 메모와 사본 표는 그대로). ② `npm run policy:diff`는 검증본과 현재 시험 정책의 차이만 보여 주고, `npm run policy:restore`는 미리보기와 확인 코드를 거쳐서만 검증본 모듈의 규칙을 되돌립니다(다른 모듈 규칙은 보존하고 `xdr/alerts.log`에는 한 줄만 덧붙임). 두 절의 자세한 설명은 위 '10단계 작업'과 '정책 사본 되돌리기'에 있습니다. 1~9단계 기능은 그대로입니다.
 - 설정 대조: `aleph.config.json`의 `step`은 10, `allowedRoutes`는 여섯 경로(`GET /api/notes` 목록 경로는 선언에서 뺐고 화면용으로 서버에는 그대로 있음, `POST /api/restore/:id` 포함, `test/notes-restore.test.mjs`가 `vercel.json`과 대조), `restoreRoute`는 `POST /api/restore/:id`(형식이 운영 측 양식과 같은지는 미확인)입니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`identityProvider`·`originalApiUrl`은 바꾸지 않았습니다. `RULE_IDS`는 실제로 구현한 다섯 개(`device_registered`, `step_up_required`, `zone_notes_own_route`, `zone_announcement_edit`, `zone_unknown_route`) 그대로입니다. 복원 경로는 서버 함수의 소유자·해시 대조이고 판정기 규칙이 아닙니다.
 - 단계 목록: `build-public.mjs`·`deployment-identity.mjs`에 10을 더했고, `test/r5.test.mjs`의 '지원하지 않는 단계' 시험은 11로 옮겼습니다.
-- 다시 실행: `npm ci` 뒤 `node --test test/*.test.mjs`(2026-10-13 로컬 89건 중 89건 통과, 가짜 DB·가짜 로그인 검사기·임시 폴더 기준이며 심판 판정이 아님), `npm run decider:test`, `npm run detect:test`, `npm run policy:diff`, `npm run build -- --local`. 복구 뒤 1~9단계를 다시 확인하는 순서는 위 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서'를 따릅니다.
+- 다시 실행: `npm ci` 뒤 `node --test test/*.test.mjs`(2026-10-13 로컬 115건 중 115건 통과, 가짜 DB·가짜 로그인 검사기·임시 폴더 기준이며 심판 판정이 아님), `npm run decider:test`, `npm run detect:test`, `npm run policy:diff`, `npm run build -- --local`. 복구 뒤 1~9단계를 다시 확인하는 순서는 위 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서'를 따릅니다.
 - `src/attack-check.mjs`: 10단계 항목으로 토큰 없는 `POST /api/restore/:id`가 `401`인지 실제로 보내는 점검(`anonymous_api_restore`)을 더했습니다. 로그인이 필요한 `restore_cross_owner`·`restore_normal_one_note`는 **미실행**으로 남습니다. 실제로 보낸 요청의 상태 코드만 기록하며 심판의 판정이 아닙니다.
-- 미실행으로 남은 것: 실제 배포 화면에서의 사본 생성과 복원(사본 표 저장이 실제 DB에서 되는지 포함, 사본을 일부러 변조했을 때 멈추는지는 가짜 DB 시험만), 실제 `xdr/deny-rules.json`에 `policy:restore -- --apply` 적용, A·B 두 계정의 배포 화면 확인, 5단계 ①~④, 미등록 기기 공격과 재로그인 뒤 허용(6·7단계), 반 엔진의 사건 전달·접속 회수(9단계). 배포 주소가 이 커밋을 배포하기 전이면 이전 코드일 수 있습니다.
+- 미실행으로 남은 것: 사본을 일부러 변조했을 때 멈추는지 실제 DB로 확인(`npm run restore:tamper-check`, 가짜 DB 시험만 통과; 사본 생성·복원·감사 덧붙이기는 배포에서 셀프체크로 확인함), 실제 `xdr/deny-rules.json`에 `policy:restore -- --apply` 적용, A·B 두 계정의 배포 화면 확인, 5단계 ①~④, 미등록 기기 공격과 재로그인 뒤 허용(6·7단계), 반 엔진의 사건 전달·접속 회수(9단계). 배포 주소가 이 커밋을 배포하기 전이면 이전 코드일 수 있습니다.
 - 제출 묶음: 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).

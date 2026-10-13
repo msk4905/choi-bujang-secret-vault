@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { createNotesHandler } from '../src/notes-handler.mjs';
 import { createRestoreRoute } from '../api/restore/[id].js';
 import { runSelfCheck } from '../scripts/restore-selfcheck.mjs';
+import { runTamperCheck } from '../scripts/restore-tamper-check.mjs';
 
 // 실제 핸들러(메모 API + 복구 경로)를 가짜 DB 위에 올린 로컬 서버로 확인 스크립트를 시험합니다. 실제 Supabase·실제 토큰은 쓰지 않습니다.
 const USER = '22222222-2222-4222-8222-222222222222';
@@ -128,4 +129,27 @@ test('https가 아닌 원격 주소와 토큰 없음은 요청을 보내기 전�
   withUserInfo.password = 'dummy';
   await assert.rejects(runSelfCheck({ baseUrl: withUserInfo.href, token: TOKEN, log: () => {} }), /https/u);
   await assert.rejects(runSelfCheck({ baseUrl: 'https://example.com', token: '', log: () => {} }), /토큰/u);
+});
+
+test('사본 변조 확인: 사본 내용을 바꾸면 복구가 409로 멈추고 메모는 쓰이지 않으며, 바꾸지 않으면 확인이 실패로 나온다', async () => {
+  await withServer({}, async (baseUrl, rows) => {
+    const lines = [];
+    const log = line => lines.push(line);
+    const created = await quiet(() => runTamperCheck({ baseUrl, token: TOKEN, step: 'create', log }));
+    assert.equal(created.ok, true);
+    assert.match(lines.join('\n'), /update vault_notes_backup set content = 'tampered-copy' where note_id = '/u);
+    // 사본을 바꾸지 않으면 복구가 멈추지 않으므로 확인은 실패여야 한다
+    const untampered = await quiet(() => runTamperCheck({ baseUrl, token: TOKEN, step: 'check', id: created.id, log }));
+    assert.equal(untampered.ok, false);
+    // 사본 내용만 바꾸면(해시는 그대로) 멈추고 메모는 변조된 그대로다
+    const second = await quiet(() => runTamperCheck({ baseUrl, token: TOKEN, step: 'create', log }));
+    rows.others.vault_notes_backup.find(copy => copy.note_id === second.id).content = 'tampered-copy';
+    const tampered = await quiet(() => runTamperCheck({ baseUrl, token: TOKEN, step: 'check', id: second.id, log }));
+    assert.equal(tampered.ok, true, lines.join('\n'));
+    const cleaned = await quiet(() => runTamperCheck({ baseUrl, token: TOKEN, step: 'cleanup', id: second.id, log }));
+    assert.equal(cleaned.ok, true);
+    const output = lines.join('\n');
+    assert.equal(output.includes(TOKEN), false);
+    assert.equal(output.includes('사본 변조 시험 원래 내용'), false);
+  });
 });
