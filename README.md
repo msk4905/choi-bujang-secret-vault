@@ -164,3 +164,13 @@
 - `src/attack-check.mjs`: 5단계 점검에 `unregistered_device`를 **미실행**으로 더했습니다. 미등록 기기 공격은 심판이 맡고, 이 점검은 그런 요청을 보내지 않습니다.
 - 다시 실행: `npm run decider:test`, `npm run build -- --local`입니다. `node --test test/*.test.mjs`는 `@supabase/supabase-js`가 설치되어 있어야 하므로 먼저 `npm ci`를 실행합니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).
 - 이전 5단계 ①~④ 배포 확인은 여전히 하지 않았습니다.
+
+## 7단계 저장점: 평소와 다른 접속은 다시 확인합니다
+
+- 규칙: `src/decider.mjs`의 `RULE_IDS`는 `device_registered`와 `step_up_required` 둘입니다(시작 틀의 `starter.deny`는 더 이상 쓰지 않아 뺐습니다). 등록 기기만 통과하는 6단계 규칙은 그대로이고, 그 위에 `step_up_required`가 더해졌습니다.
+- `step_up_required`: 등록 기기의 요청에서 **새벽 0~5시**, `signals.network`가 `unusual`, 최근 10분 안 `risk_signal` 합계 **10건 이상**, 세 가지가 함께일 때만 `step_up`(이유 코드 `step_up_required`)을 돌려줍니다. 지역(`region`)은 판정에 쓰지 않으므로 지역 하나만으로는 거부도 추가 확인도 되지 않습니다. `stepUp.verified`가 true이고 `authAgeSeconds`가 0~900 정수이면 `allow`, 형식이 틀리거나 901초 이상이면 다시 `step_up`입니다. 시각·네트워크 기준값과 사건 이름은 연습 자료에 맞춘 가정이며 운영 정의는 확인하지 못했습니다.
+- 입력 검사: `readSignals(request)`가 `signals.source`를 `none`·`judge_fixture`·`unverified`로 구분합니다. `verified`는 항상 `false`이고, 없거나 형식이 틀린 지역·네트워크·시각은 `null`로 남겨 정상값으로 채우지 않습니다. 헤더 같은 클라이언트 값은 요청 계약에 없어 읽지 않습니다.
+- 다시 실행: `npm run decider:test`(네 줄 모두 「통과」), `npm run fixture:7`(정상 `allow`, 복합 이상 `step_up`), `node --test test/decider-input.test.mjs`입니다. 가상 요청 연습이며 심판 판정이 아닙니다.
+- 아직 아닌 것: 엔진이 같은 로그인으로 다시 로그인한 시각을 확인하는 계약이 `docs/DECIDER_REQUEST.md`에 없어서, 다시 로그인하기 전 자료 차단과 새 로그인 뒤 허용은 실측하지 못했습니다. `src/attack-check.mjs`의 `step_up_reauth`는 **미실행**입니다. `decide()`를 부르는 곳은 시험 스크립트뿐이고 `/api/notes`는 판정기와 연결되어 있지 않습니다. `step_up_required`가 운영 등록부의 허용 이유 코드에 있는지도 확인하지 못했습니다.
+- 설정: `aleph.config.json`의 `step`은 7이고, 빌드와 `attack-check.mjs`의 단계 목록에 7을 더했습니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`allowedRoutes`·`originalApiUrl`은 바꾸지 않았습니다.
+- 제출 묶음: 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음). 이전 5단계 ①~④ 배포 확인은 여전히 하지 않았습니다.

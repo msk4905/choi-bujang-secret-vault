@@ -1,7 +1,7 @@
 // ALEPH SDP 엔진이 확인한 요청만 받는 학생 판정기 시작점입니다.
 // 6단계부터 규칙을 하나씩 추가합니다. 규칙에 걸리지 않은 요청은 모두 거부합니다.
 // 요청 본문의 userId, role, 기기 키, 토큰을 별도로 믿거나 저장하지 마세요.
-export const RULE_IDS = Object.freeze(['starter.deny', 'device_registered', 'step_up_required']);
+export const RULE_IDS = Object.freeze(['device_registered', 'step_up_required']);
 
 // 엔진이 넘긴 request.signals의 출처를 구분합니다. 판정은 바꾸지 않고 입력만 읽습니다.
 // 계약에 있는 출처는 'none'(실제 경로)과 'judge_fixture'(연습용)뿐이며, 둘 다 실제 위치 증거가 아닙니다.
