@@ -148,3 +148,19 @@
 - 다시 실행: `npm run xdr:run -- web-injection`으로 `result.json`을 만들고, `node xdr/web-injection/respond.mjs`로 규칙·알림을 만듭니다. 연습 경보에 맞춘 로컬 결과이며 심판의 판정이 아닙니다.
 - 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없습니다.
 - 알아 둘 점: `decide.mjs`는 이름 있는 패턴 밖의 경보도 경보 자신의 T1190 표시와 반복 횟수로 판정합니다(명령 구분자 경보 1건이 block, 반복 없는 애매한 9건이 alert). `203.0.113.10`은 brute-force와 웹 주입 규칙이 둘 다 있어, `brute-force/respond.mjs`를 다시 실행하면 주소 기준 합치기 때문에 웹 주입 규칙 하나가 사라질 수 있습니다.
+
+## 6단계 저장점: 등록한 기기만 자료실에 들어옵니다
+
+- 규칙: `src/decider.mjs`의 `device_registered` 하나입니다. `request.deviceRegistered`가 `true`일 때만 `allow`(이유 코드 `approved`)이고, `false`이거나 값이 없거나 `true`가 아닌 값이면 `deny`와 이유 코드 `device_not_registered`입니다. 사용자·기기 정보는 계약에 있는 `subjectId`, `deviceId`, `deviceRegistered`만 봅니다(`docs/DECIDER_REQUEST.md`).
+- 이번 과정에는 따로 설치할 접속 프로그램이 없습니다. 이 단계에서 설치 명령은 필요하지 않습니다.
+- 확인 순서:
+  1. 저장소 루트에서 `npm run decider:test`를 실행합니다.
+  2. 정상: 「통과 · 등록 기기의 정상 요청」(`allow`)과 「통과 · 미등록 기기의 가상 요청」(`deny`, `device_not_registered`) 두 줄이 모두 나옵니다.
+  3. 거부해야 할 결과: 둘 중 하나라도 「확인 필요」로 나오면 실패이며, 그 줄의 이름이 가리키는 쪽 규칙을 먼저 고칩니다.
+- `npm run decider:test`는 가상 요청 연습이며 심판의 판정이나 실제 접속 증거가 아닙니다. `approved`가 운영 등록부의 허용 이유 코드에 있는지는 이 저장소에서 확인하지 못했습니다.
+- 미등록 기기로 들어오려는 실제 공격 시도는 심판이 맡습니다. 이 저장소에서는 그 공격을 실행하거나 시험하지 않았습니다.
+- 지금 작동하는 것(코드 시험 기준): 5단계까지의 로그인·소유자 검사·서버 함수 흐름은 그대로이고, 판정기 `decide()`가 `device_registered` 규칙 하나로 등록 기기만 `allow`합니다. `RULE_IDS`는 `starter.deny`와 `device_registered`입니다.
+- 설정: `aleph.config.json`의 `step`은 6입니다. 빌드(`scripts/build-public.mjs`, `scripts/deployment-identity.mjs`)와 `src/attack-check.mjs`가 6단계를 받도록 단계 목록만 늘렸습니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`allowedRoutes`·`originalApiUrl`은 바꾸지 않았습니다.
+- `src/attack-check.mjs`: 5단계 점검에 `unregistered_device`를 **미실행**으로 더했습니다. 미등록 기기 공격은 심판이 맡고, 이 점검은 그런 요청을 보내지 않습니다.
+- 다시 실행: `npm run decider:test`, `npm run build -- --local`입니다. `node --test test/*.test.mjs`는 `@supabase/supabase-js`가 설치되어 있어야 하므로 먼저 `npm ci`를 실행합니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).
+- 이전 5단계 ①~④ 배포 확인은 여전히 하지 않았습니다.
