@@ -3,7 +3,7 @@
 // 토큰은 환경변수 ALEPH_TEST_TOKEN으로만 받습니다(명령줄 인자·파일·출력에 쓰지 않음). 출력에는 상태 코드와 걸린 시간만 있고,
 // 토큰과 메모 내용은 찍지 않습니다. 시험용 메모는 끝에 지웁니다(서버가 남기는 사본 한 건은 API로 지울 수 없어 사본 표에 남습니다).
 // 실제로 실행한 결과만 의미가 있습니다. 이 스크립트가 통과해도 심판 판정이 아닙니다.
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
@@ -74,8 +74,8 @@ export async function runSelfCheck({ baseUrl, token, log = console.log, timeoutM
       step('6 복구 호출(본문 없음)', restored, restored.status === 200 && restored.json?.verified === true && restored.json?.restored === 'updated');
       const back = await read(id);
       step('7 처음 내용으로 돌아옴', back, back.hash === originalHash);
-      const wrong = await call('POST', `/api/restore/${id}`, { body: { contentSha256: 'a'.repeat(64) } });
-      step('8 틀린 해시는 거부', wrong, wrong.status === 409);
+      const ignored = await call('POST', `/api/restore/${id}`, { body: { contentSha256: 'a'.repeat(64), id: randomUUID() } });
+      step('8 본문의 값은 읽지 않음(틀린 값을 담아도 사본 기준, 이미 같아서 바뀌지 않음)', ignored, ignored.status === 200 && ignored.json?.restored === 'unchanged');
       const removed = await call('DELETE', `/api/notes/${id}`);
       step('9 메모 지우기', removed, removed.status === 204);
       const recreated = await call('POST', `/api/restore/${id}`);

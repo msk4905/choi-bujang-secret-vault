@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { createClient } from '@supabase/supabase-js';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
@@ -5,6 +6,13 @@ import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const BEARER = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/u;
+
+// 심판은 A·B 두 신원(aleph_identity 'a'·'b')을 같은 sub로 보낼 수 있으므로, sub만으로 소유자를 정하면 B가 A의 메모와 사본을 같은 주인으로 다루게 됩니다.
+// 그래서 심판 토큰의 소유자 키는 (sub, 신원)을 묶어 만든 고정 UUID로 둡니다. 같은 입력이면 항상 같은 값이고, 신원이 다르면 다른 값입니다.
+export function judgeOwnerKey(sub, identity) {
+  const h = createHash('sha256').update(`aleph-judge-owner:${sub.toLowerCase()}:${identity}`, 'utf8').digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
 
 function httpsUrl(value, path) {
   if (typeof value !== 'string' || value !== value.trim()) throw new TypeError('invalid_login_issuer');
@@ -74,7 +82,7 @@ export function createLoginVerifier({ config, supabaseSecretKey, judgeKeySet,
             || !['a', 'b'].includes(payload.aleph_identity)
             || !Number.isSafeInteger(payload.iat) || !Number.isSafeInteger(payload.exp)
             || payload.exp <= payload.iat || payload.exp - payload.iat > 900) return null;
-        return Object.freeze({ kind: 'judge', userId: payload.sub,
+        return Object.freeze({ kind: 'judge', userId: judgeOwnerKey(payload.sub, payload.aleph_identity),
           runId: payload.aleph_run, identity: payload.aleph_identity });
       } catch { return null; }
     }

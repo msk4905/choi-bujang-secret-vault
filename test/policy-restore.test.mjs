@@ -46,7 +46,7 @@ test('미리보기는 복원 버전·변경 범위·확인 코드를 보여 주�
   const result = restore(root, { now: NOW });
   assert.equal(result.ok, true);
   assert.equal(result.applied, false);
-  assert.match(result.text, /복원할 검증본: 커밋 [0-9a-f]{7}/u);
+  assert.match(result.text, /복원할 검증본: 버전 \S+ · 커밋 [0-9a-f]{7}/u);
   assert.match(result.text, /다시 생길 규칙 1 · 사라질 규칙 1 · 내용이 바뀔 규칙 1/u);
   assert.match(result.text, /그대로 둘 다른 모듈 규칙: 1개/u);
   assert.match(result.text, /\+ 다시 생김\s+xdr\.brute-force\.deny\.c/u);
@@ -82,7 +82,7 @@ test('맞는 코드로 적용하면 검증본 모듈만 되돌리고 다른 모�
   assert.ok(log.startsWith(LOG));
   const added = log.slice(LOG.length).trim().split('\n');
   assert.equal(added.length, 1);
-  assert.match(added[0], / \| restore \| policy-restore \| - \| 1 \| 검증본 [0-9a-f]{7}로 복원: 생김 1, 사라짐 1, 바뀜 1/u);
+  assert.match(added[0], / \| restore \| policy-restore \| - \| 1 \| 검증본 버전 [^ (]+\(커밋 [0-9a-f]{7}\)로 복원: 생김 1, 사라짐 1, 바뀜 1/u);
   assert.equal(existsSync(join(root, 'xdr/deny-rules.json.restore-tmp')), false);
   const again = restore(root, { now: NOW });
   assert.match(again.text, /되돌릴 것이 없습니다/u);

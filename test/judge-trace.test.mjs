@@ -73,7 +73,7 @@ test('심판의 요청마다 신분·메서드·경로 종류·본문 모양·�
   }
 });
 
-test('실패 응답은 상수 오류 이름만 남는다(미리보기·사본 없음·형식 오류)', async () => {
+test('응답은 상수 오류 이름만 남는다(미리보기·본문 값 무시·사본 없음)', async () => {
   const { call } = setup();
   const lines = await capture(async () => {
     const auth = 'Bearer judge-token-xyz';
@@ -84,7 +84,7 @@ test('실패 응답은 상수 오류 이름만 남는다(미리보기·사본 �
     await call('POST', { auth, id: '66666666-6666-4666-8666-666666666666', restore: true });
   });
   assert.match(lines[2], /-> 200 preview \d+ms$/u);
-  assert.match(lines[3], /-> 400 error=INVALID_RESTORE \d+ms$/u);
+  assert.match(lines[3], /-> 200 restored=updated verified \d+ms$/u); // 본문의 값은 읽지 않고 사본 기준으로 복원
   assert.match(lines[4], /body=none .* -> 404 error=NOT_FOUND \d+ms$/u);
 });
 

@@ -33,7 +33,8 @@ export function loadVerified(root, git = (args) => execFileSync('git', args, { c
   try { manifest = JSON.parse(readFileSync(join(root, MANIFEST), 'utf8')); } catch { fail(`검증본 기록(${MANIFEST})이 없거나 읽을 수 없습니다.`); }
   if (manifest?.schema !== 'aleph.xdr.verified-policy.v1' || manifest.file !== POLICY_FILE
       || typeof manifest.commit !== 'string' || !/^[0-9a-f]{7,40}$/u.test(manifest.commit)
-      || typeof manifest.sha256 !== 'string' || !/^[0-9a-f]{64}$/u.test(manifest.sha256)) {
+      || typeof manifest.sha256 !== 'string' || !/^[0-9a-f]{64}$/u.test(manifest.sha256)
+      || (manifest.version !== undefined && (typeof manifest.version !== 'string' || !/^[A-Za-z0-9._-]{1,40}$/u.test(manifest.version)))) {
     fail('검증본 기록 형식이 올바르지 않습니다.');
   }
   let text;
@@ -42,7 +43,9 @@ export function loadVerified(root, git = (args) => execFileSync('git', args, { c
     text = git(['show', `${manifest.commit}:${POLICY_FILE}`]);
   } catch { fail(`검증본 커밋 ${manifest.commit}에서 ${POLICY_FILE} 사본을 찾을 수 없습니다.`); }
   if (createHash('sha256').update(text).digest('hex') !== manifest.sha256) fail('검증본 사본의 해시가 기록과 다릅니다. 사본이 바뀌었을 수 있습니다.');
-  return { commit: manifest.commit, sha256: manifest.sha256, policy: parsePolicy(text, `검증본 ${manifest.commit}`) };
+  // 사람이 읽는 버전 이름입니다. 기록에 없으면 커밋 앞 7자리로 이름을 붙입니다.
+  const version = manifest.version ?? `v-${manifest.commit.slice(0, 7)}`;
+  return { version, commit: manifest.commit, sha256: manifest.sha256, policy: parsePolicy(text, `검증본 ${manifest.commit}`) };
 }
 
 export function loadCurrent(root) {
@@ -71,9 +74,9 @@ export function diffPolicies(verified, current) {
 export function report(loaded, current) {
   const diff = diffPolicies(loaded.policy, current);
   const lines = [
-    `복원할 검증본: 커밋 ${loaded.commit} · ${POLICY_FILE} · sha256 ${loaded.sha256.slice(0, 12)}… (해시 일치)`,
+    `복원할 검증본: 버전 ${loaded.version} · 커밋 ${loaded.commit} · ${POLICY_FILE} · sha256 ${loaded.sha256.slice(0, 12)}… (해시 일치)`,
     `비교 대상: 현재 시험 정책 ${POLICY_FILE} (규칙 ${current.rules.length}개)`,
-    `변경 범위: 다시 생길 규칙 ${diff.restore.length} · 사라질 규칙 ${diff.remove.length} · 내용이 바뀔 규칙 ${diff.change.length} · 그대로 ${diff.unchanged}`,
+    `바뀔 항목: 다시 생길 규칙 ${diff.restore.length} · 사라질 규칙 ${diff.remove.length} · 내용이 바뀔 규칙 ${diff.change.length} · 그대로 ${diff.unchanged}`,
     `영향받는 모듈: ${diff.touchedModules.length ? diff.touchedModules.join(', ') : '없음'}`,
   ];
   for (const id of diff.restore) lines.push(`  + 다시 생김  ${id}`);

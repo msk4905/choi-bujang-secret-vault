@@ -62,9 +62,9 @@ function dirtyWarning(root) {
 
 export function previewText(loaded, plan, code, warning) {
   const lines = [
-    `복원할 검증본: 커밋 ${loaded.commit} · ${POLICY_FILE} · sha256 ${loaded.sha256.slice(0, 12)}… (해시 일치)`,
+    `복원할 검증본: 버전 ${loaded.version} · 커밋 ${loaded.commit} · ${POLICY_FILE} · sha256 ${loaded.sha256.slice(0, 12)}… (해시 일치)`,
     `되돌리는 범위: ${plan.scope.join(', ')} 모듈의 규칙만`,
-    `변경 범위: 다시 생길 규칙 ${plan.restore.length} · 사라질 규칙 ${plan.remove.length} · 내용이 바뀔 규칙 ${plan.change.length}`,
+    `바뀔 항목: 다시 생길 규칙 ${plan.restore.length} · 사라질 규칙 ${plan.remove.length} · 내용이 바뀔 규칙 ${plan.change.length}`,
     `그대로 둘 다른 모듈 규칙: ${plan.preserved.length}개 · ${AUDIT_LOG}: 지우지 않고 되돌림 기록 한 줄만 덧붙임`,
   ];
   for (const id of plan.restore) lines.push(`  + 다시 생김  ${id}`);
@@ -97,7 +97,7 @@ export function restore(root, { apply = false, confirm = null, now = Date.now() 
     writeFileSync(temp, `${JSON.stringify({ schema: policy.schema, rules: plan.nextRules }, null, 2)}\n`, 'utf8');
     renameSync(temp, target);
     const line = [new Date(now).toISOString(), 'restore', 'policy-restore', '-', 1,
-      `검증본 ${loaded.commit}로 복원: 생김 ${plan.restore.length}, 사라짐 ${plan.remove.length}, 바뀜 ${plan.change.length} (모듈 ${plan.scope.join(' ')})`].join(' | ');
+      `검증본 버전 ${loaded.version}(커밋 ${loaded.commit})로 복원: 생김 ${plan.restore.length}, 사라짐 ${plan.remove.length}, 바뀜 ${plan.change.length} (모듈 ${plan.scope.join(' ')})`].join(' | ');
     try {
       appendFileSync(logPath, `${logBefore && !logBefore.endsWith('\n') ? '\n' : ''}${line}\n`, 'utf8');
     } catch {

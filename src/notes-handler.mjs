@@ -86,7 +86,8 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, save
     if (principal.kind === 'judge') traceJudge(request, principal, response, label);
 
     if ((hasId || isRestore) && (typeof rawId !== 'string' || !UUID.test(rawId))) {
-      return response.status(400).json({ error: 'INVALID_ID' });
+      // 복구 경로는 형식이 틀린 ID도 없는 메모와 같은 404로 답합니다(존재 여부를 알려 주지 않음).
+      return isRestore ? response.status(404).json({ error: 'NOT_FOUND' }) : response.status(400).json({ error: 'INVALID_ID' });
     }
     // 8단계: 이 요청이 가리키는 자원 ID를 서버가 경로에서만 계산합니다(응답에는 싣지 않음).
     request.resourceId = noteResourceId(hasId ? rawId : undefined);

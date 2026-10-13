@@ -8,9 +8,9 @@ import { createHash } from 'node:crypto';
 export const BACKUP_TABLE = 'vault_notes_backup';
 export const AUDIT_TABLE = 'vault_audit';
 
-// 내용 해시: sha256(제목 UTF-8 바이트 + 0x00 + 본문 UTF-8 바이트). 글자에 NUL이 들어갈 수 없어 제목과 본문 경계가 모호하지 않습니다.
+// 내용 해시: sha256(제목 + 줄바꿈 + 본문)을 UTF-8로 계산한 16진수입니다. SQL(supabase/step10-backup.sql)에서도 같은 식으로 계산합니다.
 export function noteHash(title, content) {
-  return createHash('sha256').update(title, 'utf8').update(Buffer.from([0])).update(content, 'utf8').digest('hex');
+  return createHash('sha256').update(`${title}\n${content}`, 'utf8').digest('hex');
 }
 
 export function backupRecord({ noteId, userId, title, content, source }) {
@@ -21,8 +21,15 @@ export function backupRecord({ noteId, userId, title, content, source }) {
 // source: 'create'(만들 때) 또는 'before_change'(사본 없던 메모의 처음 수정·삭제 직전).
 export async function saveBackup({ db, principal, noteId, title, content, source = 'create' }) {
   try {
-    const { error } = await db.from(BACKUP_TABLE).insert(backupRecord({ noteId, userId: principal.userId, title, content, source }));
-    if (error && error.code !== '23505') throw error; // 23505: 이미 사본이 있으면 그대로 둠
+    const record = backupRecord({ noteId, userId: principal.userId, title, content, source });
+    const { error } = await db.from(BACKUP_TABLE).insert(record);
+    if (error?.code === '23505') return; // 이미 사본이 있으면 그대로 둠(덮어쓰지 않음)
+    if (error) throw error;
+    // 방금 남긴 사본을 바로 다시 읽어 검증합니다: 같은 메모·소유자·내용 해시로 저장됐는지 확인하고, 다르면 서버 로그에만 남깁니다.
+    const { data: saved, error: readError } = await db.from(BACKUP_TABLE).select('note_id, owner_id, content_hash')
+      .eq('note_id', noteId).maybeSingle();
+    if (readError) throw readError;
+    if (!saved || saved.owner_id !== principal.userId || saved.content_hash !== record.content_hash) console.error('notes backup verify failed');
   } catch {
     console.error('notes backup not saved');
   }

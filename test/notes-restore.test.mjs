@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { createNotesHandler } from '../src/notes-handler.mjs';
 import { backupRecord, noteHash } from '../src/notes-backup.mjs';
@@ -149,15 +150,18 @@ test('지워진 B 메모도 본문 없이 한 번 호출하면 되살아난다',
   assert.deepEqual([row.owner_id, noteHash(row.title, row.content)], [B, hash]);
 });
 
-test('요청에 내용 해시를 함께 보내면 사본과 같을 때만 복원한다', async () => {
-  const state = setup();
-  await bCreatesAndTampers(state);
-  const [wrong] = await quiet(() => state.restore({ body: { contentSha256: 'a'.repeat(64) } }));
-  assert.deepEqual([wrong.code, wrong.json], [409, { error: 'HASH_MISMATCH' }]);
-  assert.deepEqual(state.writes, []);
-  assert.equal(live(state.rows).title, '변조된 제목');
-  const [right] = await quiet(() => state.restore({ body: { contentSha256: hash.toUpperCase() } }));
-  assert.equal(right.code, 200);
+test('요청 본문의 값은 읽지 않는다: 어떤 값을 담아 보내도 사본 기준으로 복원한다', async () => {
+  for (const body of [
+    { contentSha256: 'a'.repeat(64) }, { id: 'not-a-uuid', ownerId: 7 }, { title: 5, body: {} }, { owner_id: A, hash: 'zz' },
+    { contentHash: noteHash('변조된 제목', '변조된 내용'), id: B_OTHER }, [1], 'not json', { dryRun: 'yes' },
+  ]) {
+    const state = setup();
+    await bCreatesAndTampers(state);
+    const [result] = await quiet(() => state.restore({ body }));
+    assert.equal(result.code, 200, JSON.stringify(body));
+    assert.equal(result.json.restored, 'updated');
+    assert.equal(noteHash(live(state.rows).title, live(state.rows).content), hash);
+  }
 });
 
 test('dryRun은 복원할 버전과 바뀔 항목만 보여 주고 아무것도 쓰지 않는다', async () => {
@@ -288,30 +292,28 @@ test('사본을 남기지 못해도 메모 만들기는 성공하고, 그 메모
   assert.deepEqual(logged, ['notes restore denied: no_backup']);
 });
 
-test('로그인 없음 401, 잘못된 본문·ID 400, POST 아닌 메서드 405', async () => {
+test('로그인 없음 401, 형식이 틀린 ID는 없는 메모와 같은 404, POST 아닌 메서드 405', async () => {
   const state = setup();
   await bCreatesAndTampers(state);
   const before = snapshot(state.rows);
   const [codes] = await quiet(async () => [
     (await state.restore({ auth: null })).code,
-    (await state.restore({ body: { contentSha256: 'zz' } })).code,
-    (await state.restore({ body: { dryRun: 'yes' } })).code,
-    (await state.restore({ body: [1] })).code,
     (await state.call('POST', { id: 'not-a-uuid', restore: true })).code,
     (await state.call('POST', { restore: true })).code,
     (await state.call('GET', { id: B_NOTE, restore: true })).code,
     (await state.call('PUT', { id: B_NOTE, restore: true, body: { title: 't', body: 'b' } })).code,
     (await state.call('DELETE', { id: B_NOTE, restore: true })).code,
   ]);
-  assert.deepEqual(codes, [401, 400, 400, 400, 400, 400, 405, 405, 405]);
+  assert.deepEqual(codes, [401, 404, 404, 405, 405, 405]);
   assert.deepEqual(state.writes, []);
   assert.equal(snapshot(state.rows), before);
 });
 
-test('사본 레코드는 메모 ID·소유자·제목·내용과 sha256(제목+0x00+내용) 해시를 담고 출처를 적는다', () => {
+test('사본 레코드는 메모 ID·소유자·제목·내용과 sha256(제목+줄바꿈+내용) 해시를 담고 출처를 적는다', () => {
   const record = backupRecord({ noteId: B_NOTE, userId: B, title: ORIGINAL.title, content: ORIGINAL.body, source: 'create' });
   assert.deepEqual(record, { note_id: B_NOTE, owner_id: B, title: ORIGINAL.title, content: ORIGINAL.body, content_hash: hash, source: 'create' });
-  assert.notEqual(noteHash('ab', 'c'), noteHash('a', 'bc')); // 제목과 본문 경계가 모호하지 않다
+  assert.equal(noteHash('제목', '내용'), createHash('sha256').update('제목\n내용', 'utf8').digest('hex'));
+  assert.notEqual(noteHash('ab', 'c'), noteHash('a', 'bc'));
 });
 
 test('B의 메모를 지우고 복구한 직후에도 3·4·8단계 대표 공격은 그대로 거부되고 다른 사용자 자료는 보이지 않는다', async () => {
@@ -409,60 +411,6 @@ test('대문자로 보낸 메모 ID로 만들어도 사본이 맞게 남아 복�
   assert.equal(noteHash(live(state.rows, lower).title, live(state.rows, lower).content), hash);
 });
 
-const { createHash } = await import('node:crypto');
-const bodyOnly = createHash('sha256').update(ORIGINAL.body, 'utf8').digest('hex');
-
-test('요청이 담아 온 ID·소유자·제목·내용·해시가 사본과 모두 맞으면 복원한다(이름이 달라도, 해시는 두 방식 모두)', async () => {
-  for (const claims of [
-    { id: B_NOTE, ownerId: B, contentSha256: hash },
-    { noteId: B_NOTE.toUpperCase(), owner_id: B, hash: `sha256:${hash}` },
-    { id: B_NOTE, userId: B, sha256: bodyOnly, title: ORIGINAL.title, body: ORIGINAL.body },
-  ]) {
-    const state = setup();
-    await bCreatesAndTampers(state);
-    const [result] = await quiet(() => state.restore({ body: claims }));
-    assert.equal(result.code, 200, JSON.stringify(Object.keys(claims)));
-    assert.equal(noteHash(live(state.rows).title, live(state.rows).content), hash);
-  }
-});
-
-test('변조된 ID·소유자·제목·내용·해시를 담아 보내면 복원하지 않고 409로 멈춘다', async () => {
-  const forged = [
-    { id: B_OTHER },
-    { ownerId: A },
-    { owner_id: A, id: B_NOTE },
-    { title: '변조된 제목' },
-    { body: '변조된 내용' },
-    { content: '변조된 내용' },
-    { contentSha256: noteHash('변조된 제목', '변조된 내용') },
-    { hash: createHash('sha256').update('변조된 내용', 'utf8').digest('hex') },
-    { id: B_NOTE, ownerId: B, contentSha256: hash, body: '변조된 내용' }, // 일부만 맞아도 하나라도 다르면 멈춘다
-  ];
-  for (const claims of forged) {
-    const state = setup();
-    await bCreatesAndTampers(state);
-    const before = snapshot(state.rows);
-    const [result, logged] = await quiet(() => state.restore({ body: claims }));
-    assert.equal(result.code, 409, JSON.stringify(claims));
-    assert.match(result.json.error, /^(HASH|CLAIM)_MISMATCH$/u);
-    assert.deepEqual(state.writes, []);
-    assert.equal(snapshot(state.rows), before);
-    assert.equal(logged.join('\n').includes('변조된'), false); // 주장한 값은 로그에 남기지 않음
-  }
-});
-
-test('형식이 틀린 주장은 400이고 아무것도 쓰지 않는다', async () => {
-  const state = setup();
-  await bCreatesAndTampers(state);
-  const before = snapshot(state.rows);
-  for (const body of [{ id: 'not-a-uuid' }, { ownerId: 7 }, { contentSha256: 'zz' }, { title: 5 }, { body: {} }]) {
-    const [result] = await quiet(() => state.restore({ body }));
-    assert.equal(result.code, 400, JSON.stringify(body));
-  }
-  assert.deepEqual(state.writes, []);
-  assert.equal(snapshot(state.rows), before);
-});
-
 test('복구 응답은 소유자·전체 내용 해시·소유자 일치·썼는지 여부와 되살린 제목·본문(요청자 본인 것)을 보여 준다', async () => {
   const state = setup();
   await bCreatesAndTampers(state);
@@ -525,4 +473,34 @@ test('변조로 현재 메모의 제목이나 내용이 비어 있거나 문자�
     assert.equal(result.json.restored, 'updated');
     assert.equal(noteHash(live(state.rows).title, live(state.rows).content), hash);
   }
+});
+
+test('사본 검증이 실패하면 메모 표는 읽지도 쓰지도 않고 멈춘다(사본 검증이 가장 먼저)', async () => {
+  for (const break_ of [copy => { copy.content = '바뀐 사본'; }, copy => { copy.owner_id = A; }]) {
+    const state = setup();
+    await bCreatesAndTampers(state);
+    break_(state.backups[0]);
+    const touched = [];
+    const real = fakeDb(state.rows, [], {}, state.tables);
+    const db = { from: table => { touched.push(table); return real.from(table); } };
+    const route = createRestoreRoute({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db }) });
+    const result = await quiet(() => new Promise(resolve => route({ method: 'POST', query: { id: B_NOTE }, headers: { authorization: AUTH_B } },
+      { setHeader() {}, status: code => ({ json: json => resolve({ code, json }) }) })));
+    assert.ok([404, 409].includes(result[0].code));
+    assert.equal(touched.includes('notes'), false, `메모 표에 접근함: ${touched.join(',')}`);
+    assert.equal(touched[0], 'vault_notes_backup');
+  }
+});
+
+test('사본을 만든 직후 다시 읽어 검증한다: 저장된 해시가 다르면 서버 로그에만 남기고 메모 만들기는 성공한다', async () => {
+  const state = setup();
+  const [created, logged] = await quiet(() => state.call('POST', { body: { id: B_NOTE, ...ORIGINAL } }));
+  assert.equal(created.code, 201);
+  assert.deepEqual(logged, []); // 정상이면 아무 로그도 없다
+  // 저장된 사본이 달라진 경우(예: 저장 중 오류)를 흉내 낸다: 다시 읽을 때 다른 해시가 나오게 한다
+  const other = setup();
+  other.tables.vault_notes_backup.push = function push(row) { return Array.prototype.push.call(this, { ...row, content_hash: 'b'.repeat(64) }); };
+  const [created2, logged2] = await quiet(() => other.call('POST', { body: { id: B_NOTE, ...ORIGINAL } }));
+  assert.equal(created2.code, 201);
+  assert.deepEqual(logged2, ['notes backup verify failed']);
 });

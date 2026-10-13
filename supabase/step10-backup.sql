@@ -1,5 +1,5 @@
 -- 10단계: 비공개 메모 사본 표와 감사 표를 만들고, 이미 있는 메모의 사본을 남깁니다.
--- Supabase SQL Editor에서 [가] → [나] → [다] → [라] 순서로 실행합니다(여러 번 실행해도 같은 결과).
+-- Supabase SQL Editor에서 [가] → [나] → [다] → [라] → [마] 순서로 실행합니다(여러 번 실행해도 같은 결과).
 -- 비밀값·메모 본문은 이 파일에 없습니다. 메모 표(notes)의 기존 메모는 지우거나 고치지 않습니다.
 
 -- [가] 표 만들기와 권한 정리: 사본·감사 표는 덧붙이기(INSERT)와 읽기만 됩니다. anon·authenticated는 아무 권한도 없습니다.
@@ -40,16 +40,21 @@ from public.notes n
 where n.title = 'backup' and substr(n.owner_id::text, 15, 1) = '5' and n.content like '{%'
 on conflict (note_id) do nothing;
 
--- [다] 사본이 없는 기존 메모의 사본을 남깁니다. 해시는 서버 코드와 같은 sha256(제목 + 0x00 + 내용)입니다.
+-- [다] 사본이 없는 기존 메모의 사본을 남깁니다. 해시는 서버 코드와 같은 sha256(제목 + 줄바꿈 + 내용)입니다.
 insert into public.vault_notes_backup (note_id, owner_id, title, content, content_hash, source)
 select n.id, n.owner_id, n.title, n.content,
-       encode(sha256(convert_to(n.title, 'UTF8') || '\x00'::bytea || convert_to(n.content, 'UTF8')), 'hex'), 'seed'
+       encode(sha256(convert_to(n.title || E'\n' || n.content, 'UTF8')), 'hex'), 'seed'
 from public.notes n
 where n.owner_id is not null and n.title is not null and n.content is not null
   and not (n.title = 'backup' and substr(n.owner_id::text, 15, 1) = '5')
 on conflict (note_id) do nothing;
 
--- [라] 확인: notes_without_backup은 0이어야 하고, 권한 두 칸(update_or_delete_*)은 모두 false여야 합니다.
+-- [라] 이미 있는 사본의 해시를 현재 계산식(제목 + 줄바꿈 + 내용)으로 다시 계산합니다.
+-- 해시 계산식을 0x00 방식에서 줄바꿈 방식으로 바꾼 뒤 한 번 실행합니다(여러 번 실행해도 같은 결과). 제목·내용·소유자는 바꾸지 않습니다.
+update public.vault_notes_backup
+set content_hash = encode(sha256(convert_to(title || E'\n' || content, 'UTF8')), 'hex');
+
+-- [마] 확인: notes_without_backup은 0이어야 하고, 권한 두 칸(update_or_delete_*)은 모두 false여야 합니다.
 select
   (select count(*) from public.notes n
     where n.owner_id is not null and n.title is not null and n.content is not null

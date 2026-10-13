@@ -38,7 +38,7 @@ test('차이는 복원할 버전과 변경 범위를 보여 주고 파일을 쓰
   const root = setup({ verified: V, current });
   const result = run(root);
   assert.equal(result.ok, true);
-  assert.match(result.text, /복원할 검증본: 커밋 [0-9a-f]{7} .*해시 일치/u);
+  assert.match(result.text, /복원할 검증본: 버전 \S+ · 커밋 [0-9a-f]{7} .*해시 일치/u);
   assert.match(result.text, /다시 생길 규칙 1 · 사라질 규칙 1 · 내용이 바뀔 규칙 1 · 그대로 1/u);
   assert.match(result.text, /\+ 다시 생김\s+xdr\.brute-force\.deny\.c/u);
   assert.match(result.text, /- 사라짐\s+xdr\.test\.deny\.z/u);
@@ -91,4 +91,18 @@ test('현재 정책이 깨져 있으면 중단한다', () => {
 test('diffPolicies는 같은 규칙 이름이 다른 모듈에 걸치면 영향 모듈을 모은다', () => {
   const d = diffPolicies({ rules: [rule('xdr.brute-force.deny.a')] }, { rules: [rule('xdr.web-injection.deny.b')] });
   assert.deepEqual(d.touchedModules, ['xdr.brute-force', 'xdr.web-injection']);
+});
+
+test('검증본 기록의 버전 이름을 보여 주고, 형식이 틀린 버전이면 중단한다', () => {
+  const root = setup({ verified: V, current: V });
+  const manifest = JSON.parse(readFileSync(join(root, 'xdr/verified-policy.json'), 'utf8'));
+  writeFileSync(join(root, 'xdr/verified-policy.json'), JSON.stringify({ ...manifest, version: 'safe-v1' }));
+  const named = run(root);
+  assert.equal(named.ok, true);
+  assert.match(named.text, /복원할 검증본: 버전 safe-v1 · 커밋 [0-9a-f]{7}/u);
+  assert.match(named.text, /바뀔 항목: 다시 생길 규칙 0/u);
+  writeFileSync(join(root, 'xdr/verified-policy.json'), JSON.stringify({ ...manifest, version: '버전 1 !' }));
+  const broken = run(root);
+  assert.equal(broken.ok, false);
+  assert.match(broken.text, /형식이 올바르지 않습니다/u);
 });
