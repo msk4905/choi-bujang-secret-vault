@@ -50,14 +50,14 @@ async function withServer(options, fn) {
     req.on('data', c => chunks.push(c));
     req.on('end', () => {
       const url = new URL(req.url, 'http://localhost');
-      const restore = /^\/api\/notes\/([^/]+)\/restore$/u.exec(url.pathname);
+      const restore = /^\/api\/restore\/([^/]+)$/u.exec(url.pathname);
       const item = /^\/api\/notes\/([^/]+)$/u.exec(url.pathname);
-      const query = restore ? { id: restore[1], restore: '1' } : item ? { id: item[1] } : {};
+      const query = restore ? { id: restore[1] } : item ? { id: item[1] } : {};
       let body;
       const text = Buffer.concat(chunks).toString('utf8');
       if (text) { try { body = JSON.parse(text); } catch { body = text; } }
       const headers = {};
-      handler({ method: req.method, query, headers: { authorization: req.headers.authorization }, body }, {
+      handler({ method: req.method, query, headers: { authorization: req.headers.authorization }, body, ...(restore ? { restoreRoute: true } : {}) }, {
         setHeader: (k, v) => { headers[k] = v; },
         status: code => ({
           json: json => { res.writeHead(code, { ...headers, 'Content-Type': 'application/json' }); res.end(JSON.stringify(json)); },

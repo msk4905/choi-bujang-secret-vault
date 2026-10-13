@@ -100,7 +100,7 @@ async function apiChecks(app, config) {
     remove: await send(app, 'DELETE', `/api/notes/${NIL_ID}`),
     forged: await send(app, 'GET', '/api/notes', { token: forged }),
     // 10단계: 없는 id와 빈 본문만 써서 사본이나 메모를 바꾸지 않는다.
-    restore: config.step >= 10 ? await send(app, 'POST', `/api/notes/${NIL_ID}/restore`, { body: {} }) : null,
+    restore: config.step >= 10 ? await send(app, 'POST', `/api/restore/${NIL_ID}`, { body: {} }) : null,
   };
   return [
     { attackId: 'anonymous_api_list', expected: '토큰 없는 GET /api/notes가 401로 거부됨', observed: describe('토큰 없는 GET /api/notes', results.list) },
@@ -119,7 +119,7 @@ async function apiChecks(app, config) {
     ...(config.step >= 9 ? [{ attackId: 'detect_revocation_proposal', expected: '10분 안 다량 조회와 낯선 네트워크가 함께인 복합 의심 사건만 확인된 기기 한 개의 회수 제안을 내고, 정상 사건은 내지 않음',
       observed: '미실행: 이 점검은 반 엔진의 사건 전달이나 접속 회수를 시험하지 않음. npm run detect:test와 node --test test/detect-*.test.mjs는 가상 사건 연습일 뿐이며 심판의 판정이 아님' }] : []),
     ...(config.step >= 10 ? [
-      { attackId: 'anonymous_api_restore', expected: '토큰 없는 POST /api/notes/:id/restore가 401로 거부됨', observed: describe('토큰 없는 POST /api/notes/:id/restore', results.restore) },
+      { attackId: 'anonymous_api_restore', expected: '토큰 없는 POST /api/restore/:id가 401로 거부됨', observed: describe('토큰 없는 POST /api/restore/:id', results.restore) },
       { attackId: 'restore_cross_owner', expected: 'B 로그인으로 A의 메모 복원을 요청하면 404로 거부되고, 요청한 해시가 사본과 다르면 409로 거부되며 다른 메모는 바뀌지 않음',
         observed: '미실행: 이 점검은 A·B 로그인 계정을 쓰지 않아 사본이 남은 메모를 만들 수 없음. 학생이 두 계정으로 직접 확인해야 함. 코드 시험(node --test test/notes-restore.test.mjs)은 가짜 DB 기준이며 심판의 판정이 아님' },
       { attackId: 'restore_normal_one_note', expected: 'B 로그인으로 사본에 있는 B의 메모 한 건을 복원하면 verified: true이고 다른 메모는 그대로임',

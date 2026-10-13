@@ -36,7 +36,7 @@ function setup() {
   const handler = createNotesHandler({ getDeps: () => ({ verify: async auth => tokens[auth] ?? null, db: fakeDb(rows) }) });
   const call = (method, { id, auth, body, restore, headers = {} } = {}) => new Promise(resolve => {
     const response = { setHeader() {}, status: code => ({ json: json => resolve({ code, json }), end: () => resolve({ code }) }) };
-    handler({ method, query: { ...(id ? { id } : {}), ...(restore ? { restore: '1' } : {}) }, headers: { authorization: auth, ...headers }, body }, response);
+    handler({ method, query: id ? { id } : {}, headers: { authorization: auth, ...headers }, body, ...(restore ? { restoreRoute: true } : {}) }, response);
   });
   return { rows, call };
 }
@@ -61,7 +61,7 @@ test('심판의 요청마다 신분·메서드·경로 종류·본문 모양·�
   assert.equal(lines.length, 3);
   assert.match(lines[0], /^trace: judge\/b POST collection q=\{\} body=\{body:str<=100,id:uuid,title:str<=10\} .* -> 201 \d+ms$/u);
   assert.match(lines[1], /^trace: judge\/b PUT item .* -> 200 \d+ms$/u);
-  assert.match(lines[2], /^trace: judge\/b POST restore q=\{restore:str<=10\} body=\{backup:\{body:str<=100,title:str<=10\},contentSha256:hex64,id:uuid,ownerId:uuid\} ct=application\/json ua=judge-bot\/1\.0 -> 200 restored=updated verified \d+ms$/u);
+  assert.match(lines[2], /^trace: judge\/b POST restore q=\{\} body=\{backup:\{body:str<=100,title:str<=10\},contentSha256:hex64,id:uuid,ownerId:uuid\} ct=application\/json ua=judge-bot\/1\.0 -> 200 restored=updated verified \d+ms$/u);
   const all = lines.join('\n');
   for (const secret of [SECRET_BODY, '비밀 제목', '변조 제목', '변조 내용', '사본 제목', NOTE, JUDGE_B.userId, JUDGE_B.runId, HASH, noteHash('비밀 제목', SECRET_BODY), 'judge-token-xyz']) {
     assert.equal(all.includes(secret), false, `로그에 값이 남음: ${secret}`);

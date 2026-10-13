@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { createNotesHandler } from '../src/notes-handler.mjs';
 import { backupOwnerId, backupRow, backupRowId, noteHash } from '../src/notes-restore.mjs';
@@ -83,7 +83,8 @@ function setup(options) {
       setHeader() {},
       status(code) { return { json: json => resolve({ code, json }), end: () => resolve({ code }) }; },
     };
-    handler({ method, query: { ...(id === undefined ? {} : { id }), ...(restore ? { restore: '1' } : {}) }, headers: { authorization: auth }, body }, response);
+    // 복구 요청은 api/restore/[id].js가 붙이는 restoreRoute 표시로만 열린다(쿼리 값으로는 열리지 않음).
+    handler({ method, query: id === undefined ? {} : { id }, headers: { authorization: auth }, body, ...(restore ? { restoreRoute: true } : {}) }, response);
   });
   const restore = (opts = {}) => call('POST', { id: B_NOTE, restore: true, ...opts });
   return { rows, writes, call, restore };
@@ -235,7 +236,7 @@ test('같은 ID의 현재 메모 주인이 사본 소유자와 다르면 덮어�
 // 같은 메모리 DB를 쓰되, 복원 때 쓰는 첫 쓰기만 어긋나게 만드는 핸들러를 따로 만든다.
 const callOn = (rows, options) => {
   const handler = createNotesHandler({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows, [], options) }) });
-  return new Promise(resolve => handler({ method: 'POST', query: { id: B_NOTE, restore: '1' }, headers: { authorization: AUTH_B } },
+  return new Promise(resolve => handler({ method: 'POST', query: { id: B_NOTE }, headers: { authorization: AUTH_B }, restoreRoute: true },
     { setHeader() {}, status: code => ({ json: json => resolve({ code, json }) }) }));
 };
 
@@ -475,12 +476,33 @@ test('서로 독립인 DB 호출은 겹쳐 실행된다: 복구와 수정·삭�
   assert.ok(stats.max >= 2, `복구에서 겹침 없음(최대 동시 ${stats.max})`); // 사본·메모 읽기와 쓴 뒤 재확인 읽기가 겹침
 });
 
-test('vercel.json 주소 변환과 허용 경로가 구현과 맞다', () => {
+test('복구 경로는 선언한 api/restore/[id].js 하나뿐이다: 설정·파일·vercel.json이 서로 맞고 숨은 입구가 없다', async () => {
   const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
   const config = JSON.parse(readFileSync(new URL('../aleph.config.json', import.meta.url), 'utf8'));
-  const sources = vercel.rewrites.map(item => item.source);
-  assert.ok(sources.indexOf('/api/notes/:id/restore') < sources.indexOf('/api/notes/:id'));
-  assert.equal(vercel.rewrites.find(item => item.source === '/api/notes/:id/restore').destination, '/api/notes?id=:id&restore=1');
-  assert.ok(config.allowedRoutes.includes('POST /api/notes/:id/restore'));
-  assert.equal(config.restoreRoute, 'POST /api/notes/:id/restore');
+  assert.ok(existsSync(new URL('../api/restore/[id].js', import.meta.url)), 'api/restore/[id].js 파일이 없음');
+  assert.ok(config.allowedRoutes.includes('POST /api/restore/:id'));
+  assert.equal(config.restoreRoute, 'POST /api/restore/:id');
+  assert.equal(config.allowedRoutes.some(route => route.includes('/restore') && route !== 'POST /api/restore/:id'), false);
+  assert.equal(vercel.rewrites.some(item => /restore/u.test(item.source) || /restore/u.test(item.destination)), false); // 옛 rewrite·restore=1 쿼리 입구 없음
+  // 실제 진입 파일을 부른다: Supabase 환경변수가 없으면 503, 복구 분기는 POST만 받는다(GET은 405).
+  const saved = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SECRET_KEY };
+  delete process.env.SUPABASE_URL; delete process.env.SUPABASE_SECRET_KEY;
+  try {
+    const { default: restoreEntry } = await import('../api/restore/[id].js');
+    const { default: notesEntry } = await import('../api/notes.js');
+    const run = (entry, request) => new Promise(resolve => {
+      const headers = {};
+      entry(request, { setHeader: (k, v) => { headers[k] = v; }, status: code => ({ json: json => resolve({ code, json, headers }), end: () => resolve({ code, headers }) }) });
+    });
+    const get = await run(restoreEntry, { method: 'GET', query: { id: B_NOTE }, headers: {} });
+    assert.deepEqual([get.code, get.headers.Allow], [405, 'POST']);
+    const post = await run(restoreEntry, { method: 'POST', query: { id: B_NOTE }, headers: {}, body: {} });
+    assert.deepEqual([post.code, post.json], [503, { error: 'NOTES_NOT_CONFIGURED' }]);
+    // 옛 입구(쿼리 restore=1)는 더 이상 복구 분기를 열지 않는다: 메모 한 건 경로의 POST는 허용 메서드가 아니라 405.
+    const viaQuery = await run(notesEntry, { method: 'POST', url: `/api/notes?id=${B_NOTE}&restore=1`, query: { id: B_NOTE, restore: '1' }, headers: {}, body: {} });
+    assert.deepEqual([viaQuery.code, viaQuery.headers.Allow], [405, 'GET, PUT, DELETE']);
+  } finally {
+    if (saved.url !== undefined) process.env.SUPABASE_URL = saved.url;
+    if (saved.key !== undefined) process.env.SUPABASE_SECRET_KEY = saved.key;
+  }
 });

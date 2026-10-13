@@ -56,8 +56,8 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, save
     response.setHeader('Cache-Control', 'no-store');
     const rawId = request.query?.id;
     const hasId = rawId !== undefined;
-    // POST /api/notes/:id/restore는 vercel.json이 ?id=:id&restore=1로 넘깁니다. 복원 경로는 POST만 받습니다.
-    const isRestore = request.query?.restore === '1';
+    // 복구 요청은 api/restore/[id].js(POST /api/restore/:id)가 restoreRoute 표시를 붙여 넘긴 것뿐입니다. 쿼리 값으로는 열리지 않고 POST만 받습니다.
+    const isRestore = request.restoreRoute === true;
     const allowed = isRestore ? ['POST'] : hasId ? ['GET', 'PUT', 'DELETE'] : ['GET', 'POST'];
     if (!allowed.includes(request.method)) {
       response.setHeader('Allow', allowed.join(', '));

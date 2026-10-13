@@ -65,27 +65,27 @@ export async function runSelfCheck({ baseUrl, token, log = console.log, timeoutM
       step('2 메모 변조', edit, edit.status === 200);
       const after = await read(id);
       step('3 변조된 것 확인', after, after.hash === tamperedHash);
-      const preview = await call('POST', `/api/notes/${id}/restore`, { body: { dryRun: true } });
+      const preview = await call('POST', `/api/restore/${id}`, { body: { dryRun: true } });
       step('4 복구 미리보기(버전·바뀔 항목만, 쓰지 않음)', preview, preview.status === 200 && preview.json?.preview === true
         && typeof preview.json.version === 'string' && Array.isArray(preview.json.willChange) && preview.json.willChange.length > 0);
       const stillBad = await read(id);
       step('5 미리보기는 아무것도 쓰지 않음', stillBad, stillBad.hash === tamperedHash);
-      const restored = await call('POST', `/api/notes/${id}/restore`);
+      const restored = await call('POST', `/api/restore/${id}`);
       step('6 복구 호출(본문 없음)', restored, restored.status === 200 && restored.json?.verified === true && restored.json?.restored === 'updated');
       const back = await read(id);
       step('7 처음 내용으로 돌아옴', back, back.hash === originalHash);
-      const wrong = await call('POST', `/api/notes/${id}/restore`, { body: { contentSha256: 'a'.repeat(64) } });
+      const wrong = await call('POST', `/api/restore/${id}`, { body: { contentSha256: 'a'.repeat(64) } });
       step('8 틀린 해시는 거부', wrong, wrong.status === 409);
       const removed = await call('DELETE', `/api/notes/${id}`);
       step('9 메모 지우기', removed, removed.status === 204);
-      const recreated = await call('POST', `/api/notes/${id}/restore`);
+      const recreated = await call('POST', `/api/restore/${id}`);
       step('10 지운 뒤 복구', recreated, recreated.status === 201 && recreated.json?.restored === 'created' && recreated.json?.verified === true);
       const again = await read(id);
       step('11 되살아난 내용 확인', again, again.hash === originalHash);
     }
-    const noToken = await call('POST', `/api/notes/${id ?? UNKNOWN_ID}/restore`, { auth: false });
+    const noToken = await call('POST', `/api/restore/${id ?? UNKNOWN_ID}`, { auth: false });
     step('12 로그인 없는 복구는 거부', noToken, noToken.status === 401);
-    const unknown = await call('POST', `/api/notes/${UNKNOWN_ID}/restore`);
+    const unknown = await call('POST', `/api/restore/${UNKNOWN_ID}`);
     step('13 사본 없는 메모는 거부', unknown, unknown.status === 404);
   } finally {
     if (id) await call('DELETE', `/api/notes/${id}`); // 시험용 메모 정리(이미 없으면 404여도 무시)
