@@ -15,7 +15,15 @@ const people = { 'Bearer token-a': { userId: A }, 'Bearer token-b': { userId: B 
 const AUTH_B = 'Bearer token-b';
 const ORIGINAL = { title: '가상 B 메모', body: '가상 내용입니다' };
 
-function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWrite = null, failInsertFor = null } = {}) {
+function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWrite = null, failInsertFor = null, stats = null } = {}) {
+  // stats가 있으면 DB 호출마다 잠깐 기다리며 동시에 진행 중인 호출 수의 최댓값을 기록한다(순서대로만 부르는지 겹쳐 부르는지 확인용).
+  const track = async (fn) => {
+    if (!stats) return fn();
+    stats.inFlight = (stats.inFlight ?? 0) + 1;
+    stats.max = Math.max(stats.max ?? 0, stats.inFlight);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    try { return fn(); } finally { stats.inFlight -= 1; }
+  };
   let firstWrite = true; // 변조·끼어들기는 첫 쓰기에만 적용한다
   const once = () => { const first = firstWrite; firstWrite = false; return first; };
   return {
@@ -45,20 +53,21 @@ function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWri
         order() { return builder; },
         update(value) { action = 'update'; patch = value; return builder; },
         delete() { action = 'delete'; return builder; },
-        insert(row) {
-          if (failInsertFor && failInsertFor(row)) return Promise.resolve({ error: { code: 'XX000' } });
-          row = { ...row, id: typeof row.id === 'string' ? row.id.toLowerCase() : row.id };
-          if (rows.some(item => item.id === row.id)) return Promise.resolve({ error: { code: '23505' } });
-          writes.push('insert');
-          if (!dropWrites) rows.push({ ...row });
-          if (once() && !dropWrites) {
-            if (corruptWrites) rows[rows.length - 1].content += '(변조)';
-            if (onWrite) onWrite();
-          }
-          return Promise.resolve({ error: null });
-        },
-        maybeSingle: async () => ({ data: run()[0] ?? null, error: null }),
-        then(resolve, reject) { return Promise.resolve({ data: run(), error: null }).then(resolve, reject); },
+        insert(row) { return track(() => insertNow(row)); },
+        maybeSingle: () => track(() => ({ data: run()[0] ?? null, error: null })),
+        then(resolve, reject) { return track(() => ({ data: run(), error: null })).then(resolve, reject); },
+      };
+      const insertNow = (row) => {
+        if (failInsertFor && failInsertFor(row)) return { error: { code: 'XX000' } };
+        row = { ...row, id: typeof row.id === 'string' ? row.id.toLowerCase() : row.id };
+        if (rows.some(item => item.id === row.id)) return { error: { code: '23505' } };
+        writes.push('insert');
+        if (!dropWrites) rows.push({ ...row });
+        if (once() && !dropWrites) {
+          if (corruptWrites) rows[rows.length - 1].content += '(변조)';
+          if (onWrite) onWrite();
+        }
+        return { error: null };
       };
       return builder;
     },
@@ -453,6 +462,17 @@ test('복구 응답은 소유자와 전체 내용 해시를 보여 주고, 내�
   assert.equal(result.json.contentSha256, hash);
   assert.equal(JSON.stringify(result.json).includes(ORIGINAL.body), false);
   assert.equal(JSON.stringify(result.json).includes(ORIGINAL.title), false);
+});
+
+test('서로 독립인 DB 호출은 겹쳐 실행된다: 복구와 수정·삭제가 순서대로만 기다리지 않는다', async () => {
+  const stats = {};
+  const state = setup({ stats });
+  await bCreatesAndTampers(state); // 생성 → 변조(PUT) 중에도 수정은 사본 저장과 겹쳐 실행된다
+  assert.ok(stats.max >= 2, `수정/삭제에서 겹침 없음(최대 동시 ${stats.max})`);
+  stats.max = 0;
+  const [result] = await quiet(() => state.restore());
+  assert.equal(result.code, 200);
+  assert.ok(stats.max >= 2, `복구에서 겹침 없음(최대 동시 ${stats.max})`); // 사본·메모 읽기와 쓴 뒤 재확인 읽기가 겹침
 });
 
 test('vercel.json 주소 변환과 허용 경로가 구현과 맞다', () => {

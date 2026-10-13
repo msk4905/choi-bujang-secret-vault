@@ -112,7 +112,11 @@ async function readBackup(db, principal, noteId) {
 
 // 반환: { code, json }. 오류는 던지지 않고 호출한 쪽(handler)의 try/catch에 맡깁니다.
 export async function restoreNote({ db, principal, id, input }) {
-  const found = await readBackup(db, principal, id);
+  // 서로 독립인 읽기(사본, 현재 메모)는 동시에 합니다. 사본 검증이 실패하면 메모 읽기 결과는 쓰지 않습니다.
+  const [found, liveRead] = await Promise.all([
+    readBackup(db, principal, id),
+    db.from('notes').select('id, title, content, owner_id').eq('id', id).maybeSingle(),
+  ]);
   if (found.error === 'no_backup') {
     logDenied('no_backup');
     return { code: 404, json: { error: 'NOT_FOUND' } };
@@ -136,8 +140,7 @@ export async function restoreNote({ db, principal, id, input }) {
     return { code: 409, json: { error: 'CLAIM_MISMATCH' } };
   }
 
-  const { data: live, error: liveError } = await db.from('notes')
-    .select('id, title, content, owner_id').eq('id', id).maybeSingle();
+  const { data: live, error: liveError } = liveRead;
   if (liveError) throw liveError;
   if (live && live.owner_id !== principal.userId) {
     logDenied('live_owner_differs');
@@ -182,9 +185,10 @@ export async function restoreNote({ db, principal, id, input }) {
 // 쓴 뒤에는 사본과 되살린 행을 둘 다 새로 읽어 ID·소유자·내용 해시를 확인합니다. 읽기 오류도 검증 실패로 봅니다.
 async function verifiedAfterWrite(db, principal, id, hash) {
   try {
-    const fresh = await readBackup(db, principal, id);
-    const { data: after, error } = await db.from('notes')
-      .select('id, title, content, owner_id').eq('id', id).maybeSingle();
+    const [fresh, { data: after, error }] = await Promise.all([
+      readBackup(db, principal, id),
+      db.from('notes').select('id, title, content, owner_id').eq('id', id).maybeSingle(),
+    ]);
     if (fresh.error || error || !after) return false;
     return fresh.record.sha256 === hash && after.id === id && after.owner_id === principal.userId
       && noteHash(after.title, after.content) === hash;
