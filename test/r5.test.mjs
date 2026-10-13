@@ -50,6 +50,14 @@ test('build identity uses Vercel Git and deployment metadata', () => {
     assert.equal('originalApiUrl' in deploymentIdentity(env, { ...config, step: 5, originalApiUrl: bad }), false);
   }
   assert.equal('originalApiUrl' in deploymentIdentity(env, { ...config, step: 4, originalApiUrl: original }), false);
+  // 10단계부터 복구 경로 문자열(METHOD /경로)만 공개 확인 파일에 실린다.
+  const restore = 'POST /api/notes/:id/restore';
+  assert.equal(deploymentIdentity(env, { ...config, step: 10, restoreRoute: restore }).restoreRoute, restore);
+  for (const bad of [null, '', 'POST /api/notes/:id/restore?x=1', 'POST https://x.co/restore', '/api/notes/:id/restore', 'POST /a b', 7]) {
+    assert.equal('restoreRoute' in deploymentIdentity(env, { ...config, step: 10, restoreRoute: bad }), false);
+  }
+  assert.equal('restoreRoute' in deploymentIdentity(env, { ...config, step: 9, restoreRoute: restore }), false);
+  assert.equal('restoreRoute' in deploymentIdentity(env, { ...config, step: 10 }), false);
   assert.throws(() => deploymentIdentity(env, { ...config, step: 11 }));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_PROVIDER: undefined }, config));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_COMMIT_SHA: 'short' }, config));

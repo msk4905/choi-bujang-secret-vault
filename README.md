@@ -4,7 +4,7 @@
 
 ## 10단계 요약: 복구 경로와 재시험 (먼저 읽는 곳)
 
-- 복구 경로: `POST /api/notes/:id/restore` (`aleph.config.json`의 `restoreRoute`, `/aleph.json`의 `allowedRoutes`에도 있음). 로그인한 사용자의 토큰이 필요하고, 본문 없이 한 번 보내면 복구합니다.
+- 복구 경로: `POST /api/notes/:id/restore` (`aleph.config.json`의 `restoreRoute`이고, 배포된 `/aleph.json`에도 `restoreRoute`와 `allowedRoutes`로 실립니다). 로그인한 사용자의 토큰이 필요하고, 본문 없이 한 번 보내면 복구합니다.
 - 사본 일치 대조: 메모를 만들 때 서버가 제목·내용·내용 해시를 검증용 사본으로 남깁니다. 복구 때 사본을 다시 읽어 사본 행 위치(메모 ID·소유자), 사본 기록 안의 ID·소유자, 내용 해시를 모두 대조하고, 어긋나거나 사본이 없으면 쓰지 않고 멈춥니다(`404`·`409`). 쓴 뒤에는 사본과 되살린 행을 다시 읽어 같은지 확인하고 다르면 되돌립니다(`502`).
 - 실행 전 확인: 본문 `{"dryRun": true}`를 보내면 복원할 버전과 바뀔 항목만 돌려주고 아무것도 쓰지 않습니다.
 - 보존: 다른 메모와 사본, `xdr/alerts.log`는 지우거나 고치지 않습니다. 운영 정책에는 접근하지 않습니다. 시험 정책 사본(`xdr/deny-rules.json`)은 `npm run policy:diff`(차이만 보기)와 `npm run policy:restore`(미리보기와 확인 코드를 거친 되돌리기)로 다룹니다.
@@ -208,7 +208,7 @@
 
 ## 10단계 작업: 비공개 사본에서 메모 한 건만 복원
 
-- 서비스·경로: 기존 메모 서버 함수 `/api/notes`(새 함수 파일 없음)의 `POST /api/notes/:id/restore`입니다. `vercel.json`이 `/api/notes/:id/restore`를 `/api/notes?id=:id&restore=1`로 넘기고, 이 경로는 POST만 받습니다. `aleph.config.json`의 `allowedRoutes`에 같은 경로를 더했고 `restoreRoute`에도 적었습니다(`restoreRoute`의 적는 형식이 운영 측 양식과 같은지는 확인하지 못했습니다). `step`은 10단계 저장점에서 10으로 올렸습니다.
+- 서비스·경로: 기존 메모 서버 함수 `/api/notes`(새 함수 파일 없음)의 `POST /api/notes/:id/restore`입니다. `vercel.json`이 `/api/notes/:id/restore`를 `/api/notes?id=:id&restore=1`로 넘기고, 이 경로는 POST만 받습니다. `aleph.config.json`의 `allowedRoutes`에 같은 경로를 더했고 `restoreRoute`에도 적었으며, 10단계부터 `scripts/deployment-identity.mjs`가 `restoreRoute`를 `/aleph.json`에도 싣습니다(`restoreRoute`의 적는 형식이 운영 측 양식과 같은지는 확인하지 못했습니다). `step`은 10단계 저장점에서 10으로 올렸습니다.
 - 사본은 서버가 자동으로 남깁니다: 로그인한 사용자가 `POST /api/notes`로 메모를 만들면, 서버가 만든 직후 그 메모의 제목·내용·해시를 검증용 사본으로 한 번 남깁니다. 사본은 `notes` 표 안의 예약 행입니다. 행 ID와 `owner_id`를 (메모 ID, 확인된 사용자 ID)에서 계산한 값으로 두며, 이 값은 로그인 검사가 받는 v4 사용자 ID와 같아질 수 없습니다. 그래서 목록·조회·수정·삭제 API로는 보이지도 고쳐지지도 않고 서버 전용 키로만 읽습니다. 별도 표나 SQL 실행은 필요 없습니다. 사본은 만들 때 한 번만 남기며 이후 수정으로 덮어쓰지 않습니다(침해 전에 검증한 사본). 이미 있으면 그대로 둡니다.
 - 요청: 로그인한 사용자의 `Authorization: Bearer` 토큰으로 `POST /api/notes/<메모 id>/restore`를 **본문 없이 한 번** 보내면 됩니다. 소유자는 서버가 확인한 로그인 결과만 쓰고 본문의 `owner_id`·`userId` 같은 값은 읽지 않습니다. 선택 본문: `{"contentSha256":"<64자리 소문자 16진수>"}`는 사본의 해시와 같을 때만 진행하고(다르면 `409`), `{"dryRun": true}`는 복원할 버전(`version`), 할 일(`action`: `create`·`update`), 바뀔 항목(`willChange`: `title`·`content`)만 돌려주고 **아무것도 쓰지 않습니다**(실행 전 확인).
 - 대조: 사본을 새로 읽어 사본의 행 위치(메모 ID·소유자), 사본 기록 안의 메모 ID·소유자, 사본 내용의 해시가 모두 맞을 때만 진행합니다. 하나라도 어긋나면 쓰지 않고 멈춥니다. 복원 뒤에는 사본과 되살린 행을 다시 새로 읽어 ID·소유자·내용 해시가 같은지 확인하고, 다르면 쓴 내용을 되돌립니다(새로 만든 행은 지우고 고친 행은 이전 제목·내용으로 돌림). 그때 응답은 `502 RESTORE_UNVERIFIED`입니다.

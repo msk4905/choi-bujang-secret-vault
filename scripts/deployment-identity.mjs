@@ -40,5 +40,10 @@ export function deploymentIdentity(env, config) {
     if (original && original.protocol === 'https:' && !original.username && !original.password
         && !original.search && !original.hash) identity.originalApiUrl = original.href;
   }
+  // 10단계부터는 복구 경로("METHOD /경로" 문자열뿐, 쿼리·공백·비밀값 없음)도 공개 확인 파일에 싣는다.
+  if (config.step >= 10 && typeof config.restoreRoute === 'string'
+      && /^[A-Z]{3,7} \/[A-Za-z0-9/_:.-]{1,200}$/u.test(config.restoreRoute)) {
+    identity.restoreRoute = config.restoreRoute;
+  }
   return identity;
 }
