@@ -50,7 +50,7 @@ test('build identity uses Vercel Git and deployment metadata', () => {
     assert.equal('originalApiUrl' in deploymentIdentity(env, { ...config, step: 5, originalApiUrl: bad }), false);
   }
   assert.equal('originalApiUrl' in deploymentIdentity(env, { ...config, step: 4, originalApiUrl: original }), false);
-  assert.throws(() => deploymentIdentity(env, { ...config, step: 9 }));
+  assert.throws(() => deploymentIdentity(env, { ...config, step: 10 }));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_PROVIDER: undefined }, config));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_COMMIT_SHA: 'short' }, config));
 });

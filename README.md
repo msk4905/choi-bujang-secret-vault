@@ -184,3 +184,14 @@
 - 설정: `aleph.config.json`의 `step`은 8이고 빌드와 `attack-check.mjs`의 단계 목록에 8을 더했습니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`allowedRoutes`·`originalApiUrl`은 바꾸지 않았습니다. 연습 자료 `scripts/fixture-7.mjs`의 경로는 UUID 모양으로 바꿨습니다.
 - 다시 실행: `npm ci` 뒤 `npm run decider:test`(「통과」 여덟 줄), `node --test test/*.test.mjs`(가짜 DB·가짜 로그인 검사기, 심판 판정이 아님)입니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).
 - `src/attack-check.mjs`: `cross_zone_direct_api`를 **미실행**으로 더했습니다. A·B 로그인 계정을 쓰지 않아서입니다. 5단계 ①~④와 이전 미실행 항목, 실제 배포 화면의 A·B 확인은 여전히 하지 않았습니다.
+
+## 9단계 저장점: 의심 사건에서 회수 제안만 냅니다
+
+- 입력: `src/detect.mjs`의 `readEvents`가 사건에서 `at`, `method`, `identity.sub`만 읽습니다. 메모 내용·토큰·이름 같은 다른 칸은 복사하지 않고, 형식이 틀린 사건은 값 없이 개수로만 셉니다. `docs/DETECT_EVENTS.md`에 없는 선택 칸 `network`(`usual`·`unusual`), `deviceId`, `deviceRegistered`는 가정이며, 형식이 맞을 때만 읽고 아니면 `null`입니다. 지역은 읽지 않습니다.
+- 회수 제안: `detect(events)`는 `docs/DETECT_EVENTS.md` 계약대로 같은 사용자의 `GET`이 어느 10분 구간에서 120건을 넘을 때(정확히 120건은 제외) `{ action: 'propose_revocation', reasonCode: 'burst_read', subject }`를 돌려주고, 그 밖에는 `observe`입니다. 다른 사용자의 사건은 합산하지 않고 10분 밖의 사건은 한 묶음으로 세지 않습니다. 구간의 모든 사건이 등록 기기(`deviceRegistered`가 `true`) 한 개에서 왔을 때만 그 `deviceId`를 덧붙입니다. 계약 모양의 사건에는 기기 칸이 없어 세 칸 그대로입니다. 회수를 실행하거나 기기 권한을 바꾸는 코드, 시각을 만드는 코드는 없습니다. 실제 회수와 시간은 심판이 확인합니다.
+- 복합 의심(별도 함수): `flagSuspicious(events)`는 위 다량 조회에 `network`가 `unusual`인 사건이 함께 있을 때만 `flag_suspicious`(이유 코드 `burst_unusual_network`)를 돌려줍니다. `proposeRevocation(events)`는 그 의심 구간이 등록 기기 한 개에서 왔을 때만 그 기기를 대상으로 회수를 제안하고, 기기를 확인할 수 없거나 둘 이상이면 `observe`입니다. 다량 조회만, 낯선 네트워크만, 지역만은 이 두 함수에서 의심이 아닙니다.
+- 알려진 한계: `proposeRevocation`은 의심 구간에 정상 기기 사건이 하나라도 섞이면 제안을 내지 않습니다. 정상 기기를 잘못 회수하지 않기 위한 보수적 선택입니다.
+- 다시 실행: `npm ci` 뒤 `node --test test/detect-*.test.mjs`(통과해야 함)와 `npm run detect:test`입니다. `npm run detect:test`는 여섯 줄 모두 「통과」여야 합니다. 모두 가상 사건 연습이며 반 엔진의 사건 전달·접속 회수가 연결됐다는 증거나 심판 판정이 아닙니다. `detect()`·`flagSuspicious()`·`proposeRevocation()`을 부르는 곳은 시험 스크립트뿐입니다.
+- 설정: `aleph.config.json`의 `step`은 9이고 빌드와 `src/attack-check.mjs`의 단계 목록에 9를 더했습니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`allowedRoutes`·`originalApiUrl`은 바꾸지 않았습니다. `RULE_IDS`는 8단계와 같습니다(`src/decider.mjs`는 바꾸지 않음).
+- `src/attack-check.mjs`: `detect_revocation_proposal`을 **미실행**으로 더했습니다. 5단계 ①~④, A·B 로그인 확인, 이전 미실행 항목도 여전히 하지 않았습니다.
+- 제출 묶음: 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).
