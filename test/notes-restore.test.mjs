@@ -82,6 +82,13 @@ function setup(options) {
   return { tables, writes, call, original, hash: noteHash(original.title, original.content) };
 }
 
+// 2단계 요청: ① 확인 코드 없이 보내 미리보기를 받고 ② 받은 코드로 실행한다.
+async function twoStep(call, { id = B_NOTE, auth = 'Bearer token-b', hash }) {
+  const preview = await call('POST', { auth, id, body: { contentSha256: hash } });
+  if (preview.code !== 200 || !preview.json.preview) return preview;
+  return call('POST', { auth, id, body: { contentSha256: hash, confirm: preview.json.confirm } });
+}
+
 async function quiet(fn) {
   const saved = { warn: console.warn, info: console.info, error: console.error };
   const logged = [];
@@ -93,9 +100,9 @@ const snapshot = rows => JSON.stringify(rows);
 test('지워진 B 메모 한 건을 사본에서 되살리고 ID·소유자·내용 해시가 사본과 같다', async () => {
   const { tables, writes, call, original, hash } = setup();
   const before = { others: snapshot(tables.notes), backup: snapshot(tables.notes_backup) };
-  const [result, logged] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash } }));
+  const [result, logged] = await quiet(() => twoStep(call, { hash }));
   assert.equal(result.code, 201);
-  assert.deepEqual(result.json, { id: B_NOTE, restored: 'created', verified: true });
+  assert.deepEqual(result.json, { id: B_NOTE, restored: 'created', version: `sha256:${hash.slice(0, 12)}`, willChange: ['title', 'content'], verified: true });
   const live = tables.notes.find(row => row.id === B_NOTE);
   assert.equal(live.id, original.id);
   assert.equal(live.owner_id, original.owner_id);
@@ -103,7 +110,7 @@ test('지워진 B 메모 한 건을 사본에서 되살리고 ID·소유자·내
   assert.deepEqual(writes, [['notes', 'insert']]);
   assert.equal(snapshot(tables.notes.filter(row => row.id !== B_NOTE)), before.others);
   assert.equal(snapshot(tables.notes_backup), before.backup);
-  assert.deepEqual(logged, ['notes restored: created']);
+  assert.deepEqual(logged, ['notes restore preview', 'notes restored: created']);
   for (const secret of [B_NOTE, A, B, 'token-b', original.content, hash]) assert.equal(logged.join('\n').includes(secret), false);
 });
 
@@ -111,7 +118,7 @@ test('내용이 바뀐 B 메모는 사본 내용으로 한 건만 되돌리고 �
   const { tables, writes, call, original, hash } = setup();
   tables.notes.push(note(B_NOTE, B, '고친 제목', '고친 내용'));
   const others = snapshot(tables.notes.filter(row => row.id !== B_NOTE));
-  const [result] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash.toUpperCase(), owner_id: A } }));
+  const [result] = await quiet(() => twoStep(call, { hash: hash.toUpperCase() }));
   assert.equal(result.code, 200);
   assert.equal(result.json.restored, 'updated');
   const live = tables.notes.find(row => row.id === B_NOTE);
@@ -169,7 +176,7 @@ test('같은 ID의 현재 메모 주인이 사본 소유자와 다르면 덮어�
 
 test('복원 뒤 다시 읽은 값이 사본과 다르면 502로 알린다', async () => {
   const { call, hash } = setup({ dropWrites: true });
-  const [result] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash } }));
+  const [result] = await quiet(() => twoStep(call, { hash }));
   assert.deepEqual([result.code, result.json], [502, { error: 'RESTORE_UNVERIFIED' }]);
 });
 
@@ -179,7 +186,7 @@ test('로그인 없음 401, 사본 없음 404, 잘못된 본문·ID 400, POST �
   const [codes] = await quiet(async () => [
     (await call('POST', { id: B_NOTE, body: { contentSha256: hash } })).code,
     (await call('POST', { ...b, id: '66666666-6666-4666-8666-666666666666', body: { contentSha256: hash } })).code,
-    (await call('POST', { ...b, id: B_NOTE, body: {} })).code,
+    (await call('POST', { ...b, id: B_NOTE, body: { confirm: 'abcdefabcdef' } })).code,
     (await call('POST', { ...b, id: B_NOTE, body: { contentSha256: 'zz' } })).code,
     (await call('POST', { ...b, id: 'not-a-uuid', body: { contentSha256: hash } })).code,
     (await call('POST', { ...b, body: { contentSha256: hash } })).code,
@@ -211,7 +218,7 @@ test('vercel.json 주소 변환과 허용 경로가 구현과 맞다', () => {
 test('복원 뒤 검증에 실패하면 쓴 내용을 되돌린다: 새로 만든 행은 지운다', async () => {
   const { tables, call, hash } = setup({ corruptWrites: true });
   const before = snapshot(tables.notes);
-  const [result, logged] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash } }));
+  const [result, logged] = await quiet(() => twoStep(call, { hash }));
   assert.deepEqual([result.code, result.json], [502, { error: 'RESTORE_UNVERIFIED' }]);
   assert.equal(snapshot(tables.notes), before);
   assert.ok(logged.some(line => line.includes('notes restore unverified')));
@@ -222,7 +229,7 @@ test('복원 뒤 검증에 실패하면 쓴 내용을 되돌린다: 고친 행�
   const { tables, call, hash } = setup({ corruptWrites: true });
   tables.notes.push(note(B_NOTE, B, '고친 제목', '고친 내용'));
   const before = snapshot(tables.notes);
-  const [result] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash } }));
+  const [result] = await quiet(() => twoStep(call, { hash }));
   assert.deepEqual([result.code, result.json], [502, { error: 'RESTORE_UNVERIFIED' }]);
   assert.equal(snapshot(tables.notes), before);
 });
@@ -232,7 +239,68 @@ test('쓰는 사이 사본이 바뀌면 사본을 다시 읽어 알아채고 되
   const state = setup({ onWrite: () => { tables.notes_backup[0].content = '사이에 바뀐 사본'; } });
   tables = state.tables;
   const before = snapshot(tables.notes);
-  const [result] = await quiet(() => state.call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: state.hash } }));
+  const [result] = await quiet(() => twoStep(state.call, { hash: state.hash }));
   assert.deepEqual([result.code, result.json], [502, { error: 'RESTORE_UNVERIFIED' }]);
+  assert.equal(snapshot(tables.notes), before);
+});
+
+test('확인 코드 없이 보내면 복원할 버전과 바뀔 항목만 보여 주고 아무것도 쓰지 않는다', async () => {
+  const { tables, writes, call, hash } = setup();
+  tables.notes.push(note(B_NOTE, B, '고친 제목', '가상 내용입니다')); // 제목만 다름
+  const before = snapshot(tables.notes);
+  for (const body of [{ contentSha256: hash }, {}, undefined]) {
+    const [result, logged] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body }));
+    assert.equal(result.code, 200);
+    assert.deepEqual({ ...result.json, confirm: undefined }, { id: B_NOTE, preview: true, version: `sha256:${hash.slice(0, 12)}`,
+      action: 'update', willChange: ['title'], confirm: undefined });
+    assert.match(result.json.confirm, /^[0-9a-f]{12}$/u);
+    assert.deepEqual(logged, ['notes restore preview']);
+    for (const secret of [B_NOTE, B, hash, '가상 내용']) assert.equal(logged.join('\n').includes(secret), false);
+  }
+  assert.deepEqual(writes, []);
+  assert.equal(snapshot(tables.notes), before);
+});
+
+test('지워진 메모의 미리보기는 만들 항목을 보여 준다', async () => {
+  const { writes, call } = setup();
+  const [result] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE }));
+  assert.deepEqual([result.json.action, result.json.willChange], ['create', ['title', 'content']]);
+  assert.deepEqual(writes, []);
+});
+
+test('틀린 확인 코드나 해시 없는 확인 코드는 쓰지 않고 멈춘다', async () => {
+  const { tables, writes, call, hash } = setup();
+  const before = snapshot(tables.notes);
+  const [wrong] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash, confirm: '000000000000' } }));
+  assert.deepEqual([wrong.code, wrong.json], [409, { error: 'CONFIRM_MISMATCH' }]);
+  const [noHash] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { confirm: '000000000000' } }));
+  assert.equal(noHash.code, 400);
+  assert.deepEqual(writes, []);
+  assert.equal(snapshot(tables.notes), before);
+});
+
+test('미리보기 뒤 사본이나 메모가 바뀌면 이전 확인 코드로는 쓰지 않는다', async () => {
+  for (const change of [
+    tables => { tables.notes_backup[0].title = '미리보기 뒤 바뀐 사본'; tables.notes_backup[0].content_sha256 = noteHash('미리보기 뒤 바뀐 사본', tables.notes_backup[0].content); },
+    tables => { tables.notes.push(note(B_NOTE, B, '미리보기 뒤 생긴 메모', '새 내용')); },
+  ]) {
+    const { tables, writes, call, hash } = setup();
+    const [preview] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash } }));
+    change(tables);
+    const before = snapshot(tables.notes);
+    const [result] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash, confirm: preview.json.confirm } }));
+    assert.equal(result.code, 409);
+    assert.deepEqual(writes, []);
+    assert.equal(snapshot(tables.notes), before);
+  }
+});
+
+test('다른 사용자는 B의 확인 코드를 쓸 수 없다', async () => {
+  const { tables, writes, call, hash } = setup();
+  const [preview] = await quiet(() => call('POST', { auth: 'Bearer token-b', id: B_NOTE, body: { contentSha256: hash } }));
+  const before = snapshot(tables.notes);
+  const [result] = await quiet(() => call('POST', { auth: 'Bearer token-a', id: B_NOTE, body: { contentSha256: hash, confirm: preview.json.confirm } }));
+  assert.deepEqual([result.code, result.json], [404, { error: 'NOT_FOUND' }]);
+  assert.deepEqual(writes, []);
   assert.equal(snapshot(tables.notes), before);
 });

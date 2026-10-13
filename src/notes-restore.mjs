@@ -1,5 +1,7 @@
 // 비공개 가상 메모 사본(notes_backup)에서 지정한 메모 한 건만 notes로 되살립니다. POST /api/notes/:id/restore
 // 사본은 서버 전용 키로만 읽습니다. 사용자·소유자는 서버가 확인한 로그인 결과만 쓰고 본문·헤더·쿼리의 값은 읽지 않습니다.
+// 요청은 두 단계입니다. ① 확인 코드 없이 보내면 복원할 버전과 바뀔 항목만 보여 주고 아무것도 쓰지 않습니다(응답의 confirm 코드).
+// ② {contentSha256, confirm}을 보내면 사본·현재 메모를 다시 읽어 코드가 같을 때만 씁니다.
 // 복원 전: 사본의 id·owner_id가 요청한 id·확인된 사용자와 같은지, 사본 내용의 해시가 사본에 적힌 해시와 요청이 말한 해시와 같은지 대조합니다.
 // 복원 후: 사본과 되살린 행을 새로 읽어 id·owner_id·내용 해시가 같은지 확인하고, 다르면 쓴 내용을 되돌립니다.
 // 다른 메모와 사본 표는 고치지 않습니다. 감사 기록은 따로 만들지 않고 서버 로그에 짧은 코드만 남깁니다(ID·본문·토큰 없음).
@@ -15,11 +17,23 @@ export function noteHash(title, content) {
 export function readRestoreInput(request) {
   let body = request.body;
   if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch { return null; }
+    if (body.trim() === '') body = {};
+    else { try { body = JSON.parse(body); } catch { return null; } }
   }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
-  const hash = typeof body.contentSha256 === 'string' ? body.contentSha256.toLowerCase() : '';
-  return HEX64.test(hash) ? { contentSha256: hash } : null;
+  if (body === undefined || body === null) body = {};
+  if (typeof body !== 'object' || Array.isArray(body)) return null;
+  const input = {};
+  if (body.contentSha256 !== undefined) {
+    const hash = typeof body.contentSha256 === 'string' ? body.contentSha256.toLowerCase() : '';
+    if (!HEX64.test(hash)) return null;
+    input.contentSha256 = hash;
+  }
+  if (body.confirm !== undefined) {
+    if (typeof body.confirm !== 'string' || !/^[0-9a-f]{12}$/u.test(body.confirm)) return null;
+    if (input.contentSha256 === undefined) return null;
+    input.confirm = body.confirm;
+  }
+  return input;
 }
 
 const logDenied = (reason) => console.warn(`notes restore denied: ${reason}`);
@@ -38,7 +52,7 @@ export async function restoreNote({ db, principal, id, input }) {
     logDenied('backup_corrupt');
     return { code: 409, json: { error: 'BACKUP_HASH_MISMATCH' } };
   }
-  if (hash !== input.contentSha256) {
+  if (input.contentSha256 !== undefined && hash !== input.contentSha256) {
     logDenied('request_hash_differs');
     return { code: 409, json: { error: 'HASH_MISMATCH' } };
   }
@@ -50,8 +64,27 @@ export async function restoreNote({ db, principal, id, input }) {
     logDenied('live_owner_differs');
     return { code: 404, json: { error: 'NOT_FOUND' } };
   }
+  const version = `sha256:${hash.slice(0, 12)}`;
   if (live && noteHash(live.title, live.content) === hash) {
-    return { code: 200, json: { id, restored: 'unchanged', verified: true } };
+    return { code: 200, json: { id, restored: 'unchanged', version, willChange: [], verified: true } };
+  }
+
+  // 실행 전 단계: 복원할 버전과 바뀔 항목을 보여 주고 아무것도 쓰지 않습니다. 확인 코드는 방금 새로 읽은 사본·현재 메모·사용자에서 계산하므로,
+  // 확인 코드를 붙여 다시 보냈을 때 그 사이 사본이나 메모가 바뀌었으면 코드가 달라져 멈춥니다.
+  const action = live ? 'update' : 'create';
+  const willChange = live
+    ? ['title', 'content'].filter((field) => live[field] !== backup[field])
+    : ['title', 'content'];
+  const code = createHash('sha256')
+    .update(JSON.stringify([id, principal.userId, hash, live ? noteHash(live.title, live.content) : null]))
+    .digest('hex').slice(0, 12);
+  if (input.confirm === undefined) {
+    console.info('notes restore preview');
+    return { code: 200, json: { id, preview: true, version, action, willChange, confirm: code } };
+  }
+  if (input.confirm !== code) {
+    logDenied('confirm_mismatch');
+    return { code: 409, json: { error: 'CONFIRM_MISMATCH' } };
   }
 
   // 쓰기 전 상태를 기억해 둡니다. 복원 뒤 검증에 실패하면 이 상태로 되돌립니다.
@@ -78,7 +111,7 @@ export async function restoreNote({ db, principal, id, input }) {
     return { code: 502, json: { error: 'RESTORE_UNVERIFIED' } };
   }
   console.info(`notes restored: ${mode}`);
-  return { code: mode === 'created' ? 201 : 200, json: { id, restored: mode, verified: true } };
+  return { code: mode === 'created' ? 201 : 200, json: { id, restored: mode, version, willChange, verified: true } };
 }
 
 // 쓴 뒤에는 사본과 되살린 행을 둘 다 새로 읽어 ID·소유자·내용 해시를 확인합니다. 읽기 오류도 검증 실패로 봅니다.
