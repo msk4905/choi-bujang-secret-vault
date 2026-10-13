@@ -44,6 +44,11 @@ function readInput(request) {
   return { id, title: title.trim(), body: text };
 }
 
+// 거부 사유는 서버 로그에만 짧은 코드로 남깁니다. 사용자·메모 ID, 토큰, 본문은 싣지 않고 응답도 바꾸지 않습니다.
+function logDenied(request, reason) {
+  console.warn(`notes denied: ${reason} ${request.method}`);
+}
+
 export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {}) {
   return async function handler(request, response) {
     response.setHeader('Cache-Control', 'no-store');
@@ -66,6 +71,7 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {
       console.error('login verifier failed');
     }
     if (!principal) {
+      logDenied(request, 'unauthenticated');
       response.setHeader('WWW-Authenticate', 'Bearer');
       return response.status(401).json({ error: 'UNAUTHENTICATED' });
     }
@@ -103,6 +109,7 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {
         .select('id, title, content, owner_id').eq('id', rawId).maybeSingle();
       if (readError) throw readError;
       if (!existing || existing.owner_id !== principal.userId) {
+        logDenied(request, !existing ? 'not_found' : existing.owner_id ? 'not_owner' : 'no_owner');
         return response.status(404).json({ error: 'NOT_FOUND' });
       }
       if (request.method === 'GET') {
@@ -114,14 +121,14 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {
           .update({ title: input.title, content: input.body })
           .eq('id', rawId).eq('owner_id', principal.userId).select('id, owner_id');
         if (error) throw error;
-        if (!data?.length) return response.status(404).json({ error: 'NOT_FOUND' });
+        if (!data?.length) { logDenied(request, 'owner_changed'); return response.status(404).json({ error: 'NOT_FOUND' }); }
         if (data.some(row => row.owner_id !== principal.userId)) throw new Error('owner changed');
         return response.status(200).json({ id: rawId });
       }
       const { data, error } = await deps.db.from('notes').delete()
         .eq('id', rawId).eq('owner_id', principal.userId).select('id');
       if (error) throw error;
-      if (!data?.length) return response.status(404).json({ error: 'NOT_FOUND' });
+      if (!data?.length) { logDenied(request, 'owner_changed'); return response.status(404).json({ error: 'NOT_FOUND' }); }
       return response.status(204).end();
     } catch {
       console.error('notes request failed');

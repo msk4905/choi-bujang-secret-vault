@@ -196,3 +196,27 @@ test('허용하지 않는 메서드는 405, 설정이 없으면 503', async () =
   await bare({ method: 'GET', query: {}, headers: {} }, { setHeader() {}, status: c => { code = c; return { json() {} }; } });
   assert.equal(code, 503);
 });
+
+test('메뉴를 우회한 직접 요청의 role·헤더·쿼리는 무시되고 다른 구역 자료는 나오지 않는다', async () => {
+  const { call, rows } = setup();
+  const { json: { id } } = await call('POST', { auth: 'Bearer token-a', body: { title: 'A', body: 'a' } });
+  const before = JSON.stringify(rows);
+  const rolePlay = { title: 'B', body: 'b', role: 'instructor', aleph_role: 'judge', owner_id: A, userId: A, isInstructor: true };
+  const originalWarn = console.warn;
+  const logged = [];
+  console.warn = line => logged.push(line);
+  try {
+    assert.deepEqual((await call('GET', { auth: 'Bearer token-b' })).json, []);
+    for (const [method, body] of [['GET'], ['PUT', rolePlay], ['DELETE', rolePlay]]) {
+      const result = await call(method, { auth: 'Bearer token-b', id, body });
+      assert.equal(result.code, 404);
+      assert.deepEqual(result.json, { error: 'NOT_FOUND' });
+    }
+    assert.equal((await call('GET', { id })).code, 401);
+  } finally { console.warn = originalWarn; }
+  assert.equal(JSON.stringify(rows), before);
+  // 거부 사유는 짧은 코드만 남고 사용자·메모 ID, 본문, 토큰은 로그에 없다.
+  assert.deepEqual(logged, ['notes denied: not_owner GET', 'notes denied: not_owner PUT',
+    'notes denied: not_owner DELETE', 'notes denied: unauthenticated GET']);
+  for (const line of logged) for (const secret of [id, A, B, 'token-b', 'instructor']) assert.equal(line.includes(secret), false);
+});
