@@ -7,8 +7,8 @@ const good = { at: '2026-10-01T00:00:00.000Z', method: 'GET', identity: { sub: '
 test('정상 사건은 at·method·subject 세 값과 선택 network만 남긴다', () => {
   const { events, skipped } = readEvents([{ ...good, body: 'memo text', token: 'x', name: 'real name', identity: { ...good.identity, email: 'a@b.c' } }]);
   assert.equal(skipped, 0);
-  assert.deepEqual(events, [{ at: Date.parse(good.at), method: 'GET', subject: 'learner_fixture', network: null }]);
-  assert.deepEqual(Object.keys(events[0]), ['at', 'method', 'subject', 'network']);
+  assert.deepEqual(events, [{ at: Date.parse(good.at), method: 'GET', subject: 'learner_fixture', network: null, deviceId: null }]);
+  assert.deepEqual(Object.keys(events[0]), ['at', 'method', 'subject', 'network', 'deviceId']);
 });
 
 test('형식이 틀린 사건은 값 없이 개수로만 센다', () => {
