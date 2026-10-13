@@ -1,5 +1,5 @@
 // 복구 경로를 실제 배포(또는 로컬 서버)에서 처음부터 끝까지 시험하는 학생용 확인 스크립트입니다.
-// 흐름: 메모 만들기 → 변조 → 복구 미리보기(dryRun) → 확인값을 담은 복구 → 처음 내용 확인 → 지운 뒤 복구 → 거부 확인.
+// 흐름: 메모 만들기 → 변조 → 복구 미리보기(dryRun) → 복구 → 처음 내용 확인 → 지운 뒤 복구 → 거부 확인.
 // 토큰은 환경변수 ALEPH_TEST_TOKEN으로만 받습니다(명령줄 인자·파일·출력에 쓰지 않음). 출력에는 상태 코드와 걸린 시간만 있고,
 // 토큰과 메모 내용은 찍지 않습니다. 시험용 메모는 끝에 지웁니다(서버가 남기는 사본 행 하나는 API로 지울 수 없어 남습니다).
 // 실제로 실행한 결과만 의미가 있습니다. 이 스크립트가 통과해도 심판 판정이 아닙니다.
@@ -70,16 +70,15 @@ export async function runSelfCheck({ baseUrl, token, log = console.log, timeoutM
         && typeof preview.json.version === 'string' && Array.isArray(preview.json.willChange) && preview.json.willChange.length > 0);
       const stillBad = await read(id);
       step('5 미리보기는 아무것도 쓰지 않음', stillBad, stillBad.hash === tamperedHash);
-      const restored = await call('POST', `/api/restore/${id}`, { body: { confirm: preview.json?.version } });
-      step('6 복구 호출(미리보기의 버전으로 확인)', restored, restored.status === 200 && restored.json?.verified === true && restored.json?.restored === 'updated');
+      const restored = await call('POST', `/api/restore/${id}`);
+      step('6 복구 호출(본문 없음)', restored, restored.status === 200 && restored.json?.verified === true && restored.json?.restored === 'updated');
       const back = await read(id);
       step('7 처음 내용으로 돌아옴', back, back.hash === originalHash);
       const wrong = await call('POST', `/api/restore/${id}`, { body: { contentSha256: 'a'.repeat(64) } });
       step('8 틀린 해시는 거부', wrong, wrong.status === 409);
       const removed = await call('DELETE', `/api/notes/${id}`);
       step('9 메모 지우기', removed, removed.status === 204);
-      const recreatedPreview = await call('POST', `/api/restore/${id}`);
-      const recreated = await call('POST', `/api/restore/${id}`, { body: { confirm: recreatedPreview.json?.version } });
+      const recreated = await call('POST', `/api/restore/${id}`);
       step('10 지운 뒤 복구', recreated, recreated.status === 201 && recreated.json?.restored === 'created' && recreated.json?.verified === true);
       const again = await read(id);
       step('11 되살아난 내용 확인', again, again.hash === originalHash);

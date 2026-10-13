@@ -89,12 +89,7 @@ function setup(options) {
     // 복구 요청은 api/restore/[id].js의 경로 함수로만 처리된다(쿼리 값으로는 열리지 않음).
     (restore ? restoreRoute : handler)({ method, query: id === undefined ? {} : { id }, headers: { authorization: auth }, body }, response);
   });
-  // 복구는 두 번에 나눠 한다: 처음 호출은 미리보기만, 응답의 version을 confirm으로 돌려 보낸 호출이 실제로 쓴다.
-  const restore = async (opts = {}) => {
-    const first = await call('POST', { id: B_NOTE, restore: true, ...opts });
-    if (first.code !== 200 || !first.json?.confirmRequired) return first;
-    return call('POST', { id: B_NOTE, restore: true, ...opts, body: { ...(opts.body ?? {}), confirm: first.json.version } });
-  };
+  const restore = (opts = {}) => call('POST', { id: B_NOTE, restore: true, ...opts });
   return { rows, writes, call, restore };
 }
 
@@ -116,18 +111,18 @@ const snapshot = rows => JSON.stringify(rows);
 const live = (rows, id = B_NOTE) => rows.find(row => row.id === id);
 const hash = noteHash(ORIGINAL.title, ORIGINAL.body);
 
-test('B의 메모를 변조한 뒤 미리보기 응답의 버전으로 확인해 복구하면 사본으로 돌아오고 ID·소유자·내용 해시가 같다', async () => {
+test('B의 메모를 변조한 뒤 본문 없이 복구 경로를 한 번 호출하면 사본으로 돌아오고 ID·소유자·내용 해시가 같다', async () => {
   const state = setup();
   await bCreatesAndTampers(state);
   await state.call('POST', { body: { id: B_OTHER, title: '다른 메모', body: '다른 내용' } });
   const others = snapshot(state.rows.filter(row => row.id !== B_NOTE));
   const [result, logged] = await quiet(() => state.restore());
   assert.equal(result.code, 200);
-  assert.deepEqual(result.json, { id: B_NOTE, ownerId: B, contentSha256: hash, restored: 'updated', version: `sha256:${hash.slice(0, 12)}`, willChange: ['title', 'content'], verified: true });
+  assert.deepEqual(result.json, { id: B_NOTE, ownerId: B, contentSha256: hash, title: ORIGINAL.title, body: ORIGINAL.body, ownerMatched: true, wrote: true, restored: 'updated', version: `sha256:${hash.slice(0, 12)}`, willChange: ['title', 'content'], verified: true });
   const row = live(state.rows);
   assert.deepEqual([row.id, row.owner_id, noteHash(row.title, row.content)], [B_NOTE, B, hash]);
   assert.equal(snapshot(state.rows.filter(row2 => row2.id !== B_NOTE)), others);
-  assert.deepEqual(logged, ['notes restore preview', 'notes restored: updated']);
+  assert.deepEqual(logged, ['notes restored: updated']);
   for (const secret of [B_NOTE, A, B, 'token-b', ORIGINAL.body, hash]) assert.equal(logged.join('\n').includes(secret), false);
 });
 
@@ -151,29 +146,12 @@ test('요청에 내용 해시를 함께 보내면 사본과 같을 때만 복원
   assert.equal(right.code, 200);
 });
 
-test('확인값 없이 호출하면 미리보기만 보여 주고 쓰지 않으며, 다른 버전으로 확인하면 거부한다', async () => {
-  const state = setup();
-  await bCreatesAndTampers(state);
-  const before = snapshot(state.rows);
-  const version = `sha256:${hash.slice(0, 12)}`;
-  const [preview] = await quiet(() => state.call('POST', { id: B_NOTE, restore: true }));
-  assert.equal(preview.code, 200);
-  assert.deepEqual(preview.json, { id: B_NOTE, ownerId: B, contentSha256: hash, preview: true, confirmRequired: true, version, action: 'update', willChange: ['title', 'content'] });
-  const [wrong] = await quiet(() => state.call('POST', { id: B_NOTE, restore: true, body: { confirm: 'sha256:000000000000' } }));
-  assert.deepEqual([wrong.code, wrong.json], [409, { error: 'CONFIRM_MISMATCH' }]);
-  assert.deepEqual(state.writes, []);
-  assert.equal(snapshot(state.rows), before);
-  const [done] = await quiet(() => state.call('POST', { id: B_NOTE, restore: true, body: { confirm: version } }));
-  assert.equal(done.code, 200);
-  assert.equal(done.json.restored, 'updated');
-});
-
 test('dryRun은 복원할 버전과 바뀔 항목만 보여 주고 아무것도 쓰지 않는다', async () => {
   const state = setup();
   await bCreatesAndTampers(state);
   const before = snapshot(state.rows);
   const [result, logged] = await quiet(() => state.restore({ body: { dryRun: true } }));
-  assert.deepEqual(result.json, { id: B_NOTE, ownerId: B, contentSha256: hash, preview: true, confirmRequired: false, version: `sha256:${hash.slice(0, 12)}`, action: 'update', willChange: ['title', 'content'] });
+  assert.deepEqual(result.json, { id: B_NOTE, ownerId: B, contentSha256: hash, preview: true, version: `sha256:${hash.slice(0, 12)}`, action: 'update', willChange: ['title', 'content'] });
   assert.deepEqual(logged, ['notes restore preview']);
   assert.deepEqual(state.writes, []);
   assert.equal(snapshot(state.rows), before);
@@ -259,12 +237,10 @@ test('같은 ID의 현재 메모 주인이 사본 소유자와 다르면 덮어�
 });
 
 // 같은 메모리 DB를 쓰되, 복원 때 쓰는 첫 쓰기만 어긋나게 만드는 핸들러를 따로 만든다.
-const callOn = async (rows, options) => {
+const callOn = (rows, options) => {
   const handler = createRestoreRoute({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows, [], options) }) });
-  const send = body => new Promise(resolve => handler({ method: 'POST', query: { id: B_NOTE }, headers: { authorization: AUTH_B }, body },
+  return new Promise(resolve => handler({ method: 'POST', query: { id: B_NOTE }, headers: { authorization: AUTH_B } },
     { setHeader() {}, status: code => ({ json: json => resolve({ code, json }) }) }));
-  const first = await send(undefined);
-  return first.code === 200 && first.json?.confirmRequired ? send({ confirm: first.json.version }) : first;
 };
 
 test('복원 뒤 검증에 실패하면 쓴 내용을 되돌린다: 고친 행은 이전 내용으로, 새로 만든 행은 지운다', async () => {
@@ -482,14 +458,14 @@ test('형식이 틀린 주장은 400이고 아무것도 쓰지 않는다', async
   assert.equal(snapshot(state.rows), before);
 });
 
-test('복구 응답은 소유자와 전체 내용 해시를 보여 주고, 내용 자체는 싣지 않는다', async () => {
+test('복구 응답은 소유자·전체 내용 해시·소유자 일치·썼는지 여부와 되살린 제목·본문(요청자 본인 것)을 보여 준다', async () => {
   const state = setup();
   await bCreatesAndTampers(state);
   const [result] = await quiet(() => state.restore());
   assert.equal(result.json.ownerId, B);
   assert.equal(result.json.contentSha256, hash);
-  assert.equal(JSON.stringify(result.json).includes(ORIGINAL.body), false);
-  assert.equal(JSON.stringify(result.json).includes(ORIGINAL.title), false);
+  assert.deepEqual([result.json.contentSha256, result.json.ownerMatched, result.json.wrote], [hash, true, true]);
+  assert.deepEqual([result.json.title, result.json.body], [ORIGINAL.title, ORIGINAL.body]);
 });
 
 test('서로 독립인 DB 호출은 겹쳐 실행된다: 복구와 수정·삭제가 순서대로만 기다리지 않는다', async () => {
