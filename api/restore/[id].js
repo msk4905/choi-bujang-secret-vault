@@ -3,7 +3,8 @@
 //   ① 검증한 사본을 다시 읽는다: 사본 행 위치(메모 ID·소유자), 사본 기록 안의 ID·소유자, 내용 해시를 모두 대조한다.
 //      사본이 없거나(404) 어긋나면(409) 아무것도 쓰지 않고 멈춘다.
 //   ② 요청이 담아 온 ID·소유자·제목·내용·해시가 있으면 검증된 사본과 대조만 한다(믿고 쓰지 않음). 하나라도 다르면 쓰지 않고 멈춘다(409).
-//      {"dryRun": true}를 보내면 복원할 버전과 바뀔 항목만 보여 주고 쓰지 않는다(실행 전 확인).
+//      복원은 두 번에 나눠 한다. 처음 호출(또는 {"dryRun": true})은 복원할 버전과 바뀔 항목만 보여 주고 아무것도 쓰지 않는다.
+//      그 응답의 version을 {"confirm": "<version>"}으로 되돌려 보낸 호출만 실제로 쓴다. 버전이 다르면 쓰지 않고 멈춘다(409).
 //   ③ 현재 메모를 읽고(남의 메모면 404), 제목·내용만 사본 값으로 되살린다(없으면 같은 ID·주인으로 다시 만든다). 다른 메모는 고치지 않는다.
 //   ④ 쓴 뒤 사본과 되살린 행을 새로 읽어 ID·소유자·내용 해시를 다시 대조한다. 어긋나면 쓴 내용을 되돌리고 멈춘다(502).
 // 사용자·소유자는 서버가 확인한 로그인 결과만 씁니다. 운영 정책에는 접근하지 않고, 감사 기록은 지우거나 고치지 않습니다
@@ -60,6 +61,10 @@ export function readRestoreInput(request) {
   for (const value of take('content')) {
     if (typeof value !== 'string') return null;
     (input.contents ??= []).push(value);
+  }
+  if (lower.confirm !== undefined) {
+    if (typeof lower.confirm !== 'string' || !lower.confirm) return null;
+    input.confirm = lower.confirm.toLowerCase();
   }
   if (lower.dryrun !== undefined) {
     if (typeof lower.dryrun !== 'boolean') return null;
@@ -129,9 +134,14 @@ export async function restoreNote({ db, principal, id, input }) {
   }
   const action = live ? 'update' : 'create';
   const willChange = live ? ['title', 'content'].filter((field) => live[field] !== record[field]) : ['title', 'content'];
-  if (input.dryRun) {
+  // 실행 전 확인: 확인값(confirm)이 없거나 dryRun이면 버전과 바뀔 항목만 보여 주고 멈춘다. 확인값이 이 버전과 다르면 쓰지 않는다.
+  if (input.dryRun || input.confirm === undefined) {
     console.info('notes restore preview');
-    return { code: 200, json: { id, ownerId: principal.userId, contentSha256: hash, preview: true, version, action, willChange } };
+    return { code: 200, json: { id, ownerId: principal.userId, contentSha256: hash, preview: true, confirmRequired: !input.dryRun, version, action, willChange } };
+  }
+  if (input.confirm !== version && input.confirm !== hash) {
+    logDenied('confirm_differs');
+    return { code: 409, json: { error: 'CONFIRM_MISMATCH' } };
   }
 
   // ③ 되살린다(제목·내용만). 쓰기 전 상태를 기억해 둡니다. 복원 뒤 검증에 실패하면 이 상태로 되돌립니다.
@@ -183,7 +193,7 @@ async function rollback(db, principal, id, previous) {
   } catch { console.error('notes restore rollback failed'); }
 }
 
-// 핸들러(src/notes-handler.mjs)가 로그인을 확인한 뒤 부르는 복구 진입점입니다. 본문이 없어도 됩니다.
+// 핸들러(src/notes-handler.mjs)가 로그인을 확인한 뒤 부르는 복구 진입점입니다. 본문이 없으면 미리보기만 돌려줍니다.
 async function restore({ db, principal, id, body }) {
   const input = readRestoreInput({ body });
   if (!input) return { code: 400, json: { error: 'INVALID_RESTORE' } };
