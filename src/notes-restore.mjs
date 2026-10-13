@@ -2,7 +2,7 @@
 // 사본은 notes 표 안의 예약 행입니다: 행 ID와 owner_id를 (메모 ID, 확인된 사용자 ID)에서 계산한 값으로 두어, 목록·조회·수정·삭제 경로가
 // 다루는 owner_id(진짜 사용자)와 절대 같지 않습니다. 그래서 API로는 보이지도 고쳐지지도 않고, 서버 전용 키로만 읽습니다.
 // 사본은 메모를 만든 직후 한 번만 남기며 이후 수정으로 덮어쓰지 않습니다(침해 전에 검증한 사본). 이미 있으면 그대로 둡니다.
-// 사용자·소유자는 서버가 확인한 로그인 결과만 쓰고 본문·헤더·쿼리의 값은 읽지 않습니다.
+// 사용자·소유자는 서버가 확인한 로그인 결과만 씁니다. 요청 본문의 ID·소유자·제목·내용·해시는 주장으로만 보고 사본과 대조하며 믿고 쓰지 않습니다.
 // 복원 요청은 본문 없이 한 번 보내도 됩니다. 사본을 다시 읽어 검증하고(사본의 id·소유자·내용 해시), 하나라도 어긋나면 쓰지 않고 멈춥니다.
 // 실행 전 확인이 필요하면 본문에 {"dryRun": true}를 보냅니다: 복원할 버전과 바뀔 항목만 돌려주고 아무것도 쓰지 않습니다.
 // 쓴 뒤에는 사본과 되살린 행을 새로 읽어 다시 대조하고, 어긋나면 쓴 내용을 되돌립니다. 다른 메모는 고치지 않습니다.
@@ -39,6 +39,17 @@ export async function saveBackup({ db, principal, noteId, title, content }) {
   }
 }
 
+// 요청 본문은 선택입니다. 본문에 ID·소유자·제목·내용·해시를 "주장"으로 담아 보내면 검증된 사본과 대조만 하고(값을 믿고 쓰지 않음),
+// 하나라도 다르면 복원하지 않고 멈춥니다. 같은 뜻의 이름은 모두 받습니다(대소문자 무시).
+const CLAIM_NAMES = {
+  id: ['id', 'noteid', 'note_id'],
+  owner: ['ownerid', 'owner_id', 'owner', 'userid', 'user_id'],
+  hash: ['contentsha256', 'content_sha256', 'sha256', 'contenthash', 'content_hash', 'hash'],
+  title: ['title'],
+  content: ['body', 'content'],
+};
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
 export function readRestoreInput(request) {
   let body = request.body;
   if (typeof body === 'string') {
@@ -47,15 +58,36 @@ export function readRestoreInput(request) {
   }
   if (body === undefined || body === null) body = {};
   if (typeof body !== 'object' || Array.isArray(body)) return null;
+  const lower = Object.fromEntries(Object.entries(body).map(([k, v]) => [k.toLowerCase(), v]));
   const input = {};
-  if (body.contentSha256 !== undefined) {
-    const hash = typeof body.contentSha256 === 'string' ? body.contentSha256.toLowerCase() : '';
-    if (!HEX64.test(hash)) return null;
-    input.contentSha256 = hash;
+  const take = (kind) => {
+    const names = CLAIM_NAMES[kind].filter(name => lower[name] !== undefined);
+    return names.map(name => lower[name]);
+  };
+  for (const value of take('id')) {
+    if (typeof value !== 'string' || !UUID.test(value)) return null;
+    (input.ids ??= []).push(value.toLowerCase());
   }
-  if (body.dryRun !== undefined) {
-    if (typeof body.dryRun !== 'boolean') return null;
-    input.dryRun = body.dryRun;
+  for (const value of take('owner')) {
+    if (typeof value !== 'string' || !UUID.test(value)) return null;
+    (input.owners ??= []).push(value.toLowerCase());
+  }
+  for (const value of take('hash')) {
+    const hash = typeof value === 'string' ? value.toLowerCase().replace(/^sha256:/u, '') : '';
+    if (!HEX64.test(hash)) return null;
+    (input.hashes ??= []).push(hash);
+  }
+  for (const value of take('title')) {
+    if (typeof value !== 'string') return null;
+    (input.titles ??= []).push(value);
+  }
+  for (const value of take('content')) {
+    if (typeof value !== 'string') return null;
+    (input.contents ??= []).push(value);
+  }
+  if (lower.dryrun !== undefined) {
+    if (typeof lower.dryrun !== 'boolean') return null;
+    input.dryRun = lower.dryrun;
   }
   return input;
 }
@@ -91,9 +123,17 @@ export async function restoreNote({ db, principal, id, input }) {
   }
   const { record } = found;
   const hash = record.sha256;
-  if (input.contentSha256 !== undefined && hash !== input.contentSha256) {
+  // 요청이 담아 온 주장은 사본과 대조만 합니다. 해시는 제목+본문 해시와 본문만의 해시를 모두 인정합니다.
+  const bodyOnlyHash = createHash('sha256').update(record.content, 'utf8').digest('hex');
+  const allIn = (list, ok) => (list ?? []).every(ok);
+  if (!allIn(input.hashes, (h) => h === hash || h === bodyOnlyHash)) {
     logDenied('request_hash_differs');
     return { code: 409, json: { error: 'HASH_MISMATCH' } };
+  }
+  if (!allIn(input.ids, (v) => v === id) || !allIn(input.owners, (v) => v === principal.userId)
+      || !allIn(input.titles, (v) => v === record.title) || !allIn(input.contents, (v) => v === record.content)) {
+    logDenied('claim_differs');
+    return { code: 409, json: { error: 'CLAIM_MISMATCH' } };
   }
 
   const { data: live, error: liveError } = await db.from('notes')
@@ -105,13 +145,13 @@ export async function restoreNote({ db, principal, id, input }) {
   }
   const version = `sha256:${hash.slice(0, 12)}`;
   if (live && noteHash(live.title, live.content) === hash) {
-    return { code: 200, json: { id, restored: 'unchanged', version, willChange: [], verified: true } };
+    return { code: 200, json: { id, ownerId: principal.userId, contentSha256: hash, restored: 'unchanged', version, willChange: [], verified: true } };
   }
   const action = live ? 'update' : 'create';
   const willChange = live ? ['title', 'content'].filter((field) => live[field] !== record[field]) : ['title', 'content'];
   if (input.dryRun) {
     console.info('notes restore preview');
-    return { code: 200, json: { id, preview: true, version, action, willChange } };
+    return { code: 200, json: { id, ownerId: principal.userId, contentSha256: hash, preview: true, version, action, willChange } };
   }
 
   // 쓰기 전 상태를 기억해 둡니다. 복원 뒤 검증에 실패하면 이 상태로 되돌립니다.
@@ -136,7 +176,7 @@ export async function restoreNote({ db, principal, id, input }) {
   }
   const restored = live ? 'updated' : 'created';
   console.info(`notes restored: ${restored}`);
-  return { code: live ? 200 : 201, json: { id, restored, version, willChange, verified: true } };
+  return { code: live ? 200 : 201, json: { id, ownerId: principal.userId, contentSha256: hash, restored, version, willChange, verified: true } };
 }
 
 // 쓴 뒤에는 사본과 되살린 행을 둘 다 새로 읽어 ID·소유자·내용 해시를 확인합니다. 읽기 오류도 검증 실패로 봅니다.

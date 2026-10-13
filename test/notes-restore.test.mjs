@@ -105,7 +105,7 @@ test('B의 메모를 변조한 뒤 본문 없이 복구 경로를 한 번 호출
   const others = snapshot(state.rows.filter(row => row.id !== B_NOTE));
   const [result, logged] = await quiet(() => state.restore());
   assert.equal(result.code, 200);
-  assert.deepEqual(result.json, { id: B_NOTE, restored: 'updated', version: `sha256:${hash.slice(0, 12)}`, willChange: ['title', 'content'], verified: true });
+  assert.deepEqual(result.json, { id: B_NOTE, ownerId: B, contentSha256: hash, restored: 'updated', version: `sha256:${hash.slice(0, 12)}`, willChange: ['title', 'content'], verified: true });
   const row = live(state.rows);
   assert.deepEqual([row.id, row.owner_id, noteHash(row.title, row.content)], [B_NOTE, B, hash]);
   assert.equal(snapshot(state.rows.filter(row2 => row2.id !== B_NOTE)), others);
@@ -138,7 +138,7 @@ test('dryRun은 복원할 버전과 바뀔 항목만 보여 주고 아무것도 
   await bCreatesAndTampers(state);
   const before = snapshot(state.rows);
   const [result, logged] = await quiet(() => state.restore({ body: { dryRun: true } }));
-  assert.deepEqual(result.json, { id: B_NOTE, preview: true, version: `sha256:${hash.slice(0, 12)}`, action: 'update', willChange: ['title', 'content'] });
+  assert.deepEqual(result.json, { id: B_NOTE, ownerId: B, contentSha256: hash, preview: true, version: `sha256:${hash.slice(0, 12)}`, action: 'update', willChange: ['title', 'content'] });
   assert.deepEqual(logged, ['notes restore preview']);
   assert.deepEqual(state.writes, []);
   assert.equal(snapshot(state.rows), before);
@@ -389,6 +389,70 @@ test('대문자로 보낸 메모 ID로 만들어도 사본이 맞게 남아 복�
   const [result] = await quiet(() => state.restore({ id: lower }));
   assert.equal(result.code, 200);
   assert.equal(noteHash(live(state.rows, lower).title, live(state.rows, lower).content), hash);
+});
+
+const { createHash } = await import('node:crypto');
+const bodyOnly = createHash('sha256').update(ORIGINAL.body, 'utf8').digest('hex');
+
+test('요청이 담아 온 ID·소유자·제목·내용·해시가 사본과 모두 맞으면 복원한다(이름이 달라도, 해시는 두 방식 모두)', async () => {
+  for (const claims of [
+    { id: B_NOTE, ownerId: B, contentSha256: hash },
+    { noteId: B_NOTE.toUpperCase(), owner_id: B, hash: `sha256:${hash}` },
+    { id: B_NOTE, userId: B, sha256: bodyOnly, title: ORIGINAL.title, body: ORIGINAL.body },
+  ]) {
+    const state = setup();
+    await bCreatesAndTampers(state);
+    const [result] = await quiet(() => state.restore({ body: claims }));
+    assert.equal(result.code, 200, JSON.stringify(Object.keys(claims)));
+    assert.equal(noteHash(live(state.rows).title, live(state.rows).content), hash);
+  }
+});
+
+test('변조된 ID·소유자·제목·내용·해시를 담아 보내면 복원하지 않고 409로 멈춘다', async () => {
+  const forged = [
+    { id: B_OTHER },
+    { ownerId: A },
+    { owner_id: A, id: B_NOTE },
+    { title: '변조된 제목' },
+    { body: '변조된 내용' },
+    { content: '변조된 내용' },
+    { contentSha256: noteHash('변조된 제목', '변조된 내용') },
+    { hash: createHash('sha256').update('변조된 내용', 'utf8').digest('hex') },
+    { id: B_NOTE, ownerId: B, contentSha256: hash, body: '변조된 내용' }, // 일부만 맞아도 하나라도 다르면 멈춘다
+  ];
+  for (const claims of forged) {
+    const state = setup();
+    await bCreatesAndTampers(state);
+    const before = snapshot(state.rows);
+    const [result, logged] = await quiet(() => state.restore({ body: claims }));
+    assert.equal(result.code, 409, JSON.stringify(claims));
+    assert.match(result.json.error, /^(HASH|CLAIM)_MISMATCH$/u);
+    assert.deepEqual(state.writes, []);
+    assert.equal(snapshot(state.rows), before);
+    assert.equal(logged.join('\n').includes('변조된'), false); // 주장한 값은 로그에 남기지 않음
+  }
+});
+
+test('형식이 틀린 주장은 400이고 아무것도 쓰지 않는다', async () => {
+  const state = setup();
+  await bCreatesAndTampers(state);
+  const before = snapshot(state.rows);
+  for (const body of [{ id: 'not-a-uuid' }, { ownerId: 7 }, { contentSha256: 'zz' }, { title: 5 }, { body: {} }]) {
+    const [result] = await quiet(() => state.restore({ body }));
+    assert.equal(result.code, 400, JSON.stringify(body));
+  }
+  assert.deepEqual(state.writes, []);
+  assert.equal(snapshot(state.rows), before);
+});
+
+test('복구 응답은 소유자와 전체 내용 해시를 보여 주고, 내용 자체는 싣지 않는다', async () => {
+  const state = setup();
+  await bCreatesAndTampers(state);
+  const [result] = await quiet(() => state.restore());
+  assert.equal(result.json.ownerId, B);
+  assert.equal(result.json.contentSha256, hash);
+  assert.equal(JSON.stringify(result.json).includes(ORIGINAL.body), false);
+  assert.equal(JSON.stringify(result.json).includes(ORIGINAL.title), false);
 });
 
 test('vercel.json 주소 변환과 허용 경로가 구현과 맞다', () => {
