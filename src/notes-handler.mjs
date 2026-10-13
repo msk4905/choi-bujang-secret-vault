@@ -121,7 +121,7 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, save
         if (error?.code === '23505') return response.status(409).json({ error: 'ID_EXISTS' });
         if (error) throw error;
         // 10단계: 만든 직후 검증용 사본을 한 번 남깁니다(실패해도 메모 만들기는 성공, 서버 로그에만 남음).
-        await backup({ db: deps.db, principal, noteId: id.toLowerCase(), title: input.title, content: input.body });
+        await backup({ db: deps.db, principal, noteId: id.toLowerCase(), title: input.title, content: input.body, source: 'create' });
         return response.status(201).json({ id });
       }
       // 기존 행의 owner_id를 DB에서 읽어 확인된 사용자 ID와 비교한다. URL·본문의 값은 쓰지 않는다.
@@ -139,7 +139,7 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, save
       // 사본이 없던 옛 메모도 이때부터 복원할 수 있습니다. 저장할 내용은 이미 읽어 둔 값이라 실제 수정·삭제와 동시에 하며,
       // 응답은 둘 다 끝난 뒤에 돌려줍니다. 사본 저장이 실패해도 수정·삭제는 그대로 진행하고 서버 로그에만 남습니다.
       const snapshot = typeof existing.title === 'string' && typeof existing.content === 'string'
-        ? backup({ db: deps.db, principal, noteId: String(existing.id).toLowerCase(), title: existing.title, content: existing.content })
+        ? backup({ db: deps.db, principal, noteId: String(existing.id).toLowerCase(), title: existing.title, content: existing.content, source: 'before_change' })
         : Promise.resolve();
       if (request.method === 'PUT') {
         // owner_id는 바꾸지 않고, 조건에도 owner_id를 걸어 그 사이 소유자가 바뀐 행은 건드리지 않는다.

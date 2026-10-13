@@ -1,6 +1,6 @@
 // 메모 한 건 복구 경로: POST /api/restore/:id (Vercel이 파일 이름의 [id]를 request.query.id로 채워 줍니다).
 // 이 파일 하나에 복구의 검증·복원 흐름이 모두 있습니다. 순서는 아래와 같습니다.
-//   ① 검증한 사본을 다시 읽는다: 사본 행 위치(메모 ID·소유자), 사본 기록 안의 ID·소유자, 내용 해시를 모두 대조한다.
+//   ① 검증한 사본을 다시 읽는다: 전용 표 vault_notes_backup에서 그 메모의 사본(메모 ID·소유자)을 읽고 내용 해시를 다시 계산해 대조한다.
 //      사본이 없거나(404) 어긋나면(409) 아무것도 쓰지 않고 멈춘다.
 //   ② 요청이 담아 온 ID·소유자·제목·내용·해시가 있으면 검증된 사본과 대조만 한다(믿고 쓰지 않음). 하나라도 다르면 쓰지 않고 멈춘다(409).
 //      {"dryRun": true}를 보내면 복원할 버전과 바뀔 항목만 보여 주고 쓰지 않는다(실행 전 확인).
@@ -11,7 +11,7 @@
 // 로그인 확인·환경 설정·심판 요청 추적은 src/notes-handler.mjs가 맡고, 이 파일의 restore 함수를 부릅니다.
 import { createHash } from 'node:crypto';
 import { createNotesHandler } from '../../src/notes-handler.mjs';
-import { backupOwnerId, backupRowId, noteHash } from '../../src/notes-backup.mjs';
+import { BACKUP_TABLE, noteHash, writeAudit } from '../../src/notes-backup.mjs';
 
 const HEX64 = /^[0-9a-f]{64}$/u;
 
@@ -70,20 +70,19 @@ export function readRestoreInput(request) {
 
 const logDenied = (reason) => console.warn(`notes restore denied: ${reason}`);
 
-// 사본을 새로 읽고 검증합니다: 행 위치(ID·소유자), 기록 안의 메모 ID·소유자, 내용 해시가 모두 맞아야 합니다.
+// 사본을 새로 읽고 검증합니다: 전용 표에서 그 메모의 사본을 읽고, 메모 ID·소유자가 요청과 같은지, 저장된 해시가 제목·내용으로 다시 계산한 해시와 같은지 모두 맞아야 합니다.
 async function readBackup(db, principal, noteId) {
-  const { data: row, error } = await db.from('notes').select('id, owner_id, title, content')
-    .eq('id', backupRowId(noteId)).eq('owner_id', backupOwnerId(principal.userId)).maybeSingle();
+  const { data: row, error } = await db.from(BACKUP_TABLE)
+    .select('note_id, owner_id, title, content, content_hash, source, created_at')
+    .eq('note_id', noteId).order('id', { ascending: true }).limit(1).maybeSingle();
   if (error) throw error;
   if (!row) return { error: 'no_backup' };
-  let record;
-  try { record = JSON.parse(row.content); } catch { return { error: 'backup_corrupt' }; }
-  const valid = record && typeof record === 'object' && record.v === 1
-    && record.id === noteId && record.owner === principal.userId
-    && typeof record.title === 'string' && typeof record.content === 'string'
-    && typeof record.sha256 === 'string' && HEX64.test(record.sha256)
-    && noteHash(record.title, record.content) === record.sha256;
-  return valid ? { record } : { error: 'backup_corrupt' };
+  if (row.owner_id !== principal.userId) return { error: 'not_owner' }; // 남의 메모 사본은 있는지도 알려 주지 않는다
+  const valid = typeof row.title === 'string' && typeof row.content === 'string'
+    && typeof row.content_hash === 'string' && HEX64.test(row.content_hash)
+    && String(row.note_id).toLowerCase() === noteId
+    && noteHash(row.title, row.content) === row.content_hash;
+  return valid ? { record: { title: row.title, content: row.content, sha256: row.content_hash, source: row.source, at: row.created_at } } : { error: 'backup_corrupt' };
 }
 
 // 성공 응답에 싣는 확인값: 되살린 제목·본문(요청자 본인 메모), 소유자 일치(ownerMatched), 실제로 썼는지(wrote). 모두 검증된 사본에서 온 값입니다.
@@ -96,12 +95,20 @@ export async function restoreNote({ db, principal, id, input }) {
     readBackup(db, principal, id),
     db.from('notes').select('id, title, content, owner_id').eq('id', id).maybeSingle(),
   ]);
+  const resource = `note:${id}`;
+  const audit = (action, detail) => writeAudit(db, { action, resource, actor: principal.userId, detail });
   if (found.error === 'no_backup') {
     logDenied('no_backup');
     return { code: 404, json: { error: 'NOT_FOUND' } };
   }
+  if (found.error === 'not_owner') {
+    logDenied('not_owner');
+    await audit('restore_denied', { reason: 'not_owner' });
+    return { code: 404, json: { error: 'NOT_FOUND' } };
+  }
   if (found.error) {
     logDenied('backup_corrupt');
+    await audit('restore_stopped', { reason: 'backup_hash_mismatch' });
     return { code: 409, json: { error: 'BACKUP_HASH_MISMATCH' } };
   }
   const { record } = found;
@@ -124,10 +131,12 @@ export async function restoreNote({ db, principal, id, input }) {
   if (liveError) throw liveError;
   if (live && live.owner_id !== principal.userId) {
     logDenied('live_owner_differs');
+    await audit('restore_denied', { reason: 'owner_conflict' });
     return { code: 404, json: { error: 'NOT_FOUND' } };
   }
   const version = `sha256:${hash.slice(0, 12)}`;
   if (live && noteHash(live.title, live.content) === hash) {
+    await audit('restore_note', { contentHash: hash, wrote: false });
     return { code: 200, json: { id, ownerId: principal.userId, contentSha256: hash, ...proof(record, false), restored: 'unchanged', version, willChange: [], verified: true } };
   }
   const action = live ? 'update' : 'create';
@@ -155,12 +164,14 @@ export async function restoreNote({ db, principal, id, input }) {
   // ④ 쓴 뒤 사본과 되살린 행을 다시 읽어 대조하고, 어긋나면 되돌리고 멈춘다.
   if (!await verifiedAfterWrite(db, principal, id, hash)) {
     await rollback(db, principal, id, previous);
+    await audit('restore_stopped', { reason: 'post_restore_mismatch' });
     console.error('notes restore unverified');
     return { code: 502, json: { error: 'RESTORE_UNVERIFIED' } };
   }
   const restored = live ? 'updated' : 'created';
+  await audit('restore_note', { contentHash: hash, wrote: true, source: record.source });
   console.info(`notes restored: ${restored}`);
-  return { code: live ? 200 : 201, json: { id, ownerId: principal.userId, contentSha256: hash, ...proof(record, true), restored, version, willChange, verified: true } };
+  return { code: live ? 200 : 201, json: { id, ownerId: principal.userId, contentSha256: hash, ...proof(record, true), restored, backupAt: record.at ?? null, version, willChange, verified: true } };
 }
 
 // 쓴 뒤에는 사본과 되살린 행을 둘 다 새로 읽어 ID·소유자·내용 해시를 확인합니다. 읽기 오류도 검증 실패로 봅니다.

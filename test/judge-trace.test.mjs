@@ -14,19 +14,21 @@ const HASH = 'a'.repeat(64);
 const tokens = { 'Bearer judge-token-xyz': JUDGE_B, 'Bearer student-token-xyz': STUDENT };
 
 function fakeDb(rows) {
-  return { from() {
+  const others = (rows.others ??= {}); // 사본·감사 전용 표(메모 표와 따로, 호출마다 새로 만들어도 같은 표를 씀)
+  return { from(table = 'notes') {
+    const target = table === 'notes' ? rows : (others[table] ??= []);
     const filters = []; let action = 'select'; let patch = null;
     const run = () => {
-      const hit = rows.filter(row => filters.every(([k, v]) => row[k] === v));
+      const hit = target.filter(row => filters.every(([k, v]) => row[k] === v));
       if (action === 'select') return hit.map(row => ({ ...row }));
       if (action === 'update') { hit.forEach(row => Object.assign(row, patch)); return hit.map(row => ({ id: row.id, owner_id: row.owner_id })); }
-      for (const row of hit) rows.splice(rows.indexOf(row), 1);
+      for (const row of hit) target.splice(target.indexOf(row), 1);
       return hit.map(row => ({ id: row.id }));
     };
     const b = {
-      select() { return b; }, eq(k, v) { filters.push([k, v]); return b; }, order() { return b; },
+      select() { return b; }, eq(k, v) { filters.push([k, v]); return b; }, order() { return b; }, limit() { return b; },
       update(v) { action = 'update'; patch = v; return b; }, delete() { action = 'delete'; return b; },
-      insert(row) { if (rows.some(i => i.id === row.id)) return Promise.resolve({ error: { code: '23505' } }); rows.push({ ...row }); return Promise.resolve({ error: null }); },
+      insert(row) { const key = table === 'vault_notes_backup' ? 'note_id' : 'id'; if (table !== 'vault_audit' && target.some(i => i[key] === row[key])) return Promise.resolve({ error: { code: '23505' } }); target.push({ ...row, ...(table === 'vault_notes_backup' ? { id: target.length + 1 } : {}) }); return Promise.resolve({ error: null }); },
       maybeSingle: async () => ({ data: run()[0] ?? null, error: null }),
       then(resolve, reject) { return Promise.resolve({ data: run(), error: null }).then(resolve, reject); },
     }; return b; } };

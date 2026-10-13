@@ -10,27 +10,31 @@ const USER = '22222222-2222-4222-8222-222222222222';
 const TOKEN = 'test-token-for-selfcheck-0123456789';
 
 function fakeDb(rows) {
+  const others = (rows.others ??= {}); // 사본·감사 전용 표(메모 표와 따로, 호출마다 새로 만들어도 같은 표를 씀)
   return {
-    from() {
-      const filters = [];
+    from(table = 'notes') {
+      const target = table === 'notes' ? rows : (others[table] ??= []);
+    const filters = [];
       let action = 'select';
       let patch = null;
       const run = () => {
-        const hit = rows.filter(row => filters.every(([k, v]) => row[k] === v));
+        const hit = target.filter(row => filters.every(([k, v]) => row[k] === v));
         if (action === 'select') return hit.map(row => ({ ...row }));
         if (action === 'update') { hit.forEach(row => Object.assign(row, patch)); return hit.map(row => ({ id: row.id, owner_id: row.owner_id })); }
-        for (const row of hit) rows.splice(rows.indexOf(row), 1);
+        for (const row of hit) target.splice(target.indexOf(row), 1);
         return hit.map(row => ({ id: row.id }));
       };
       const builder = {
         select() { return builder; },
         eq(key, value) { filters.push([key, value]); return builder; },
         order() { return builder; },
+        limit() { return builder; },
         update(value) { action = 'update'; patch = value; return builder; },
         delete() { action = 'delete'; return builder; },
         insert(row) {
-          if (rows.some(item => item.id === row.id)) return Promise.resolve({ error: { code: '23505' } });
-          rows.push({ ...row });
+          const key = table === 'vault_notes_backup' ? 'note_id' : 'id';
+          if (table !== 'vault_audit' && target.some(item => item[key] === row[key])) return Promise.resolve({ error: { code: '23505' } });
+          target.push({ ...row, ...(table === 'vault_notes_backup' ? { id: target.length + 1 } : {}) });
           return Promise.resolve({ error: null });
         },
         maybeSingle: async () => ({ data: run()[0] ?? null, error: null }),
@@ -85,8 +89,9 @@ test('복구가 되는 서버에서는 13단계가 모두 통과하고 시험용
     const outcome = await quiet(() => runSelfCheck({ baseUrl, token: TOKEN, log: line => lines.push(line) }));
     assert.equal(outcome.ok, true, lines.join('\n'));
     assert.equal(outcome.results.length, 13);
-    assert.equal(rows.filter(row => row.title !== 'backup').length, 0); // 시험용 메모는 지워짐
-    assert.equal(rows.filter(row => row.title === 'backup').length, 1); // 사본 행은 API로 못 지워 남음
+    assert.equal(rows.length, 0); // 시험용 메모는 지워짐
+    assert.equal(rows.others.vault_notes_backup.length, 1); // 사본은 전용 표에 남음(API로 못 지움)
+    assert.ok(rows.others.vault_audit.length >= 2); // 복구 결과는 감사 표에 덧붙음
     const output = lines.join('\n');
     assert.match(output, /요약: 13\/13 통과/u);
     for (const secret of [TOKEN, USER]) assert.equal(output.includes(secret), false, secret);

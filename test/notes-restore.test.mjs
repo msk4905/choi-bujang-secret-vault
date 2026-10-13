@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { createNotesHandler } from '../src/notes-handler.mjs';
-import { backupOwnerId, backupRow, backupRowId, noteHash } from '../src/notes-backup.mjs';
+import { backupRecord, noteHash } from '../src/notes-backup.mjs';
 import { createRestoreRoute } from '../api/restore/[id].js';
 
 // 가짜 로그인 검사기와 메모리 DB만 씁니다. 실제 Supabase·실제 토큰은 쓰지 않습니다.
@@ -16,7 +16,7 @@ const people = { 'Bearer token-a': { userId: A }, 'Bearer token-b': { userId: B 
 const AUTH_B = 'Bearer token-b';
 const ORIGINAL = { title: '가상 B 메모', body: '가상 내용입니다' };
 
-function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWrite = null, failInsertFor = null, stats = null } = {}) {
+function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWrite = null, failInsertFor = null, stats = null } = {}, tables = {}) {
   // stats가 있으면 DB 호출마다 잠깐 기다리며 동시에 진행 중인 호출 수의 최댓값을 기록한다(순서대로만 부르는지 겹쳐 부르는지 확인용).
   const track = async (fn) => {
     if (!stats) return fn();
@@ -28,30 +28,33 @@ function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWri
   let firstWrite = true; // 변조·끼어들기는 첫 쓰기에만 적용한다
   const once = () => { const first = firstWrite; firstWrite = false; return first; };
   return {
-    from() {
+    from(table = 'notes') {
+      const isNotes = table === 'notes';
+      const target = isNotes ? rows : (tables[table] ??= []);
       const filters = [];
       let action = 'select';
       let patch = null;
       const run = () => {
-        const norm = (k, v) => (k === 'id' && typeof v === 'string' ? v.toLowerCase() : v); // uuid 칸은 대소문자를 구분하지 않음
-        const hit = rows.filter(row => filters.every(([k, v]) => norm(k, row[k]) === norm(k, v)));
+        const norm = (k, v) => ((k === 'id' || k === 'note_id') && typeof v === 'string' ? v.toLowerCase() : v); // uuid 칸은 대소문자를 구분하지 않음
+        const hit = target.filter(row => filters.every(([k, v]) => norm(k, row[k]) === norm(k, v)));
         if (action === 'select') return hit.map(row => ({ ...row }));
-        writes.push(action);
+        if (isNotes) writes.push(action);
         if (action === 'update') {
           if (!dropWrites) hit.forEach(row => Object.assign(row, patch));
-          if (once()) {
+          if (isNotes && once()) {
             if (corruptWrites) hit.forEach(row => { row.content += '(변조)'; });
             if (onWrite) onWrite();
           }
           return hit.map(row => ({ id: row.id, owner_id: row.owner_id }));
         }
-        for (const row of hit) rows.splice(rows.indexOf(row), 1);
+        for (const row of hit) target.splice(target.indexOf(row), 1);
         return hit.map(row => ({ id: row.id }));
       };
       const builder = {
         select() { return builder; },
         eq(key, value) { filters.push([key, value]); return builder; },
         order() { return builder; },
+        limit() { return builder; },
         update(value) { action = 'update'; patch = value; return builder; },
         delete() { action = 'delete'; return builder; },
         insert(row) { return track(() => insertNow(row)); },
@@ -59,7 +62,17 @@ function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWri
         then(resolve, reject) { return track(() => ({ data: run(), error: null })).then(resolve, reject); },
       };
       const insertNow = (row) => {
-        if (failInsertFor && failInsertFor(row)) return { error: { code: 'XX000' } };
+        if (failInsertFor && failInsertFor(row, table)) return { error: { code: 'XX000' } };
+        if (!isNotes) {
+          if (table === 'vault_notes_backup') {
+            row = { ...row, note_id: row.note_id.toLowerCase() };
+            if (target.some(item => item.note_id === row.note_id)) return { error: { code: '23505' } };
+            row.id = target.length + 1;
+            row.created_at = '2026-01-01T00:00:00.000Z';
+          }
+          target.push({ ...row });
+          return { error: null };
+        }
         row = { ...row, id: typeof row.id === 'string' ? row.id.toLowerCase() : row.id };
         if (rows.some(item => item.id === row.id)) return { error: { code: '23505' } };
         writes.push('insert');
@@ -78,7 +91,8 @@ function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWri
 function setup(options) {
   const rows = [];
   const writes = [];
-  const getDeps = () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows, writes, options) });
+  const tables = { vault_notes_backup: [], vault_audit: [] }; // 사본 전용 표와 감사 표(메모 표와 따로)
+  const getDeps = () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows, writes, options, tables) });
   const handler = createNotesHandler({ getDeps });
   const restoreRoute = createRestoreRoute({ getDeps });
   const call = (method, { id, auth = AUTH_B, body, restore = false } = {}) => new Promise(resolve => {
@@ -90,7 +104,7 @@ function setup(options) {
     (restore ? restoreRoute : handler)({ method, query: id === undefined ? {} : { id }, headers: { authorization: auth }, body }, response);
   });
   const restore = (opts = {}) => call('POST', { id: B_NOTE, restore: true, ...opts });
-  return { rows, writes, call, restore };
+  return { rows, writes, call, restore, backups: tables.vault_notes_backup, audit: tables.vault_audit, tables };
 }
 
 // 심판이 하는 순서: B가 메모를 만들고(서버가 사본을 남김) → 변조하고 → 복구 경로를 호출한다.
@@ -118,7 +132,7 @@ test('B의 메모를 변조한 뒤 본문 없이 복구 경로를 한 번 호출
   const others = snapshot(state.rows.filter(row => row.id !== B_NOTE));
   const [result, logged] = await quiet(() => state.restore());
   assert.equal(result.code, 200);
-  assert.deepEqual(result.json, { id: B_NOTE, ownerId: B, contentSha256: hash, title: ORIGINAL.title, body: ORIGINAL.body, ownerMatched: true, wrote: true, restored: 'updated', version: `sha256:${hash.slice(0, 12)}`, willChange: ['title', 'content'], verified: true });
+  assert.deepEqual(result.json, { id: B_NOTE, ownerId: B, contentSha256: hash, title: ORIGINAL.title, body: ORIGINAL.body, ownerMatched: true, wrote: true, restored: 'updated', backupAt: '2026-01-01T00:00:00.000Z', version: `sha256:${hash.slice(0, 12)}`, willChange: ['title', 'content'], verified: true });
   const row = live(state.rows);
   assert.deepEqual([row.id, row.owner_id, noteHash(row.title, row.content)], [B_NOTE, B, hash]);
   assert.equal(snapshot(state.rows.filter(row2 => row2.id !== B_NOTE)), others);
@@ -165,26 +179,23 @@ test('이미 사본과 같으면 쓰지 않는다', async () => {
   assert.deepEqual(state.writes, []);
 });
 
-test('사본은 메모를 만들 때 한 번만 남고 이후 수정으로 덮어쓰이지 않으며 API로 보이지 않는다', async () => {
+test('사본은 전용 표에 메모당 한 건만 남고 이후 수정으로 덮어쓰이지 않으며 메모 API로 보이지 않는다', async () => {
   const state = setup();
   await bCreatesAndTampers(state);
-  const copies = state.rows.filter(row => row.owner_id === backupOwnerId(B));
-  assert.equal(copies.length, 1);
-  assert.equal(copies[0].id, backupRowId(B_NOTE));
-  assert.equal(JSON.parse(copies[0].content).sha256, hash); // 변조 뒤에도 원래 해시
+  assert.equal(state.backups.length, 1);
+  assert.deepEqual([state.backups[0].note_id, state.backups[0].owner_id, state.backups[0].source], [B_NOTE, B, 'create']);
+  assert.equal(state.backups[0].content_hash, hash); // 변조 뒤에도 원래 해시
+  assert.equal(state.rows.some(row => row.title === 'backup'), false); // 메모 표에는 사본 행이 없다
   assert.deepEqual((await state.call('GET')).json.map(item => item.id), [B_NOTE]);
-  for (const method of ['GET', 'PUT', 'DELETE']) {
-    const [result] = await quiet(() => state.call(method, { id: backupRowId(B_NOTE), body: { title: 't', body: 'b' } }));
-    assert.equal(result.code, 404);
-  }
-  assert.equal(state.rows.filter(row => row.owner_id === backupOwnerId(B)).length, 1);
+  await quiet(() => state.call('PUT', { id: B_NOTE, body: { title: '또 변조', body: '또 변조 내용' } }));
+  assert.equal(state.backups.length, 1);
+  assert.equal(state.backups[0].content_hash, hash);
 });
 
 test('사본을 변조하면(내용과 해시가 다름) 쓰지 않고 멈춘다', async () => {
   const state = setup();
   await bCreatesAndTampers(state);
-  const copy = state.rows.find(row => row.id === backupRowId(B_NOTE));
-  copy.content = copy.content.replace('가상 내용입니다', '바뀐 사본 내용');
+  state.backups[0].content = '바뀐 사본 내용'; // 해시는 그대로 두고 내용만 바꿈
   const before = snapshot(state.rows);
   const [result] = await quiet(() => state.restore());
   assert.deepEqual([result.code, result.json], [409, { error: 'BACKUP_HASH_MISMATCH' }]);
@@ -192,14 +203,13 @@ test('사본을 변조하면(내용과 해시가 다름) 쓰지 않고 멈춘다
   assert.equal(snapshot(state.rows), before);
 });
 
-test('사본의 소유자·메모 ID 기록이 행 위치와 다르면 멈춘다', async () => {
-  for (const forge of [record => ({ ...record, owner: A }), record => ({ ...record, id: B_OTHER })]) {
+test('사본의 소유자가 요청자와 다르면 404, 저장된 해시 칸이 어긋나면 409로 멈추고 아무것도 쓰지 않는다', async () => {
+  for (const [forge, code] of [[copy => { copy.owner_id = A; }, 404], [copy => { copy.content_hash = 'a'.repeat(64); }, 409]]) {
     const state = setup();
     await bCreatesAndTampers(state);
-    const copy = state.rows.find(row => row.id === backupRowId(B_NOTE));
-    copy.content = JSON.stringify(forge(JSON.parse(copy.content)));
+    forge(state.backups[0]);
     const [result] = await quiet(() => state.restore());
-    assert.equal(result.code, 409);
+    assert.equal(result.code, code);
     assert.deepEqual(state.writes, []);
   }
 });
@@ -237,8 +247,8 @@ test('같은 ID의 현재 메모 주인이 사본 소유자와 다르면 덮어�
 });
 
 // 같은 메모리 DB를 쓰되, 복원 때 쓰는 첫 쓰기만 어긋나게 만드는 핸들러를 따로 만든다.
-const callOn = (rows, options) => {
-  const handler = createRestoreRoute({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows, [], options) }) });
+const callOn = (state, options) => {
+  const handler = createRestoreRoute({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(state.rows, [], options, state.tables) }) });
   return new Promise(resolve => handler({ method: 'POST', query: { id: B_NOTE }, headers: { authorization: AUTH_B } },
     { setHeader() {}, status: code => ({ json: json => resolve({ code, json }) }) }));
 };
@@ -248,7 +258,7 @@ test('복원 뒤 검증에 실패하면 쓴 내용을 되돌린다: 고친 행�
     const state = setup();
     await bCreatesAndTampers(state, { tamper });
     const before = snapshot(state.rows);
-    const [result, logged] = await quiet(() => callOn(state.rows, { corruptWrites: true }));
+    const [result, logged] = await quiet(() => callOn(state, { corruptWrites: true }));
     assert.deepEqual([result.code, result.json], [502, { error: 'RESTORE_UNVERIFIED' }]);
     assert.equal(snapshot(state.rows), before);
     assert.ok(logged.includes('notes restore unverified'));
@@ -261,17 +271,16 @@ test('쓰는 사이 사본이 바뀌면 사본을 다시 읽어 알아채고 되
   await bCreatesAndTampers(state);
   const before = snapshot(state.rows);
   const onWrite = () => {
-    const copy = state.rows.find(row => row.id === backupRowId(B_NOTE));
-    copy.content = copy.content.replace('가상 내용입니다', '사이에 바뀜');
+    state.backups[0].content = '사이에 바뀜';
   };
-  const [result] = await quiet(() => callOn(state.rows, { onWrite }));
+  const [result] = await quiet(() => callOn(state, { onWrite }));
   assert.deepEqual([result.code, result.json], [502, { error: 'RESTORE_UNVERIFIED' }]);
   assert.equal(live(state.rows).title, '변조된 제목');
-  assert.notEqual(snapshot(state.rows), before); // 사본 행 자체는 시험이 일부러 바꾼 값 그대로
+  assert.equal(snapshot(state.rows), before.replace('변조된 내용', '변조된 내용')); // 메모는 이전 내용으로 되돌아와 있다
 });
 
 test('사본을 남기지 못해도 메모 만들기는 성공하고, 그 메모는 복원할 수 없다', async () => {
-  const state = setup({ failInsertFor: row => row.owner_id === backupOwnerId(B) });
+  const state = setup({ failInsertFor: (row, table) => table === 'vault_notes_backup' });
   const [created] = await quiet(() => state.call('POST', { body: { id: B_NOTE, ...ORIGINAL } }));
   assert.equal(created.code, 201);
   const [result, logged] = await quiet(() => state.restore());
@@ -299,14 +308,10 @@ test('로그인 없음 401, 잘못된 본문·ID 400, POST 아닌 메서드 405'
   assert.equal(snapshot(state.rows), before);
 });
 
-test('복원 요청 없이 만든 사본 행은 직접 만들 수 없는 예약 ID라 v4 사용자 ID와 겹치지 않는다', () => {
-  const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-  for (const id of [backupRowId(B_NOTE), backupOwnerId(B), backupOwnerId(A)]) {
-    assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-a[0-9a-f]{3}-[0-9a-f]{12}$/u);
-    assert.doesNotMatch(id, V4);
-  }
-  const row = backupRow({ noteId: B_NOTE, userId: B, ...{ title: ORIGINAL.title, content: ORIGINAL.body } });
-  assert.deepEqual([row.id, row.owner_id], [backupRowId(B_NOTE), backupOwnerId(B)]);
+test('사본 레코드는 메모 ID·소유자·제목·내용과 sha256(제목+0x00+내용) 해시를 담고 출처를 적는다', () => {
+  const record = backupRecord({ noteId: B_NOTE, userId: B, title: ORIGINAL.title, content: ORIGINAL.body, source: 'create' });
+  assert.deepEqual(record, { note_id: B_NOTE, owner_id: B, title: ORIGINAL.title, content: ORIGINAL.body, content_hash: hash, source: 'create' });
+  assert.notEqual(noteHash('ab', 'c'), noteHash('a', 'bc')); // 제목과 본문 경계가 모호하지 않다
 });
 
 test('B의 메모를 지우고 복구한 직후에도 3·4·8단계 대표 공격은 그대로 거부되고 다른 사용자 자료는 보이지 않는다', async () => {
@@ -360,10 +365,10 @@ test('사본이 없던 옛 메모도 처음 변조되기 직전 상태가 사본
   const [noBackup] = await quiet(() => state.restore());
   assert.equal(noBackup.code, 404); // 아직 한 번도 고치지 않았으면 사본이 없다
   assert.equal((await state.call('PUT', { id: B_NOTE, body: { title: '변조된 제목', body: '변조된 내용' } })).code, 200);
-  assert.equal(state.rows.filter(row => row.owner_id === backupOwnerId(B)).length, 1);
+  assert.deepEqual(state.backups.map(copy => copy.source), ['before_change']);
   assert.equal((await state.call('PUT', { id: B_NOTE, body: { title: '두 번째 변조', body: '또 변조' } })).code, 200);
-  const copy = JSON.parse(state.rows.find(row => row.id === backupRowId(B_NOTE)).content);
-  assert.equal(copy.sha256, hash); // 두 번째 변조가 사본을 덮어쓰지 못함
+  assert.equal(state.backups.length, 1);
+  assert.equal(state.backups[0].content_hash, hash); // 두 번째 변조가 사본을 덮어쓰지 못함
   const [result] = await quiet(() => state.restore());
   assert.deepEqual([result.code, result.json.restored, result.json.verified], [200, 'updated', true]);
   const row = live(state.rows);
@@ -381,7 +386,7 @@ test('사본이 없던 옛 메모를 지워도 직전 상태가 사본으로 남
 });
 
 test('수정 직전 사본을 남기지 못해도 수정은 그대로 성공한다', async () => {
-  const state = setup({ failInsertFor: row => row.owner_id === backupOwnerId(B) });
+  const state = setup({ failInsertFor: (row, table) => table === 'vault_notes_backup' });
   legacy(state);
   const [result] = await quiet(() => state.call('PUT', { id: B_NOTE, body: { title: '새 제목', body: '새 내용' } }));
   assert.equal(result.code, 200);
@@ -395,9 +400,9 @@ test('대문자로 보낸 메모 ID로 만들어도 사본이 맞게 남아 복�
   assert.notEqual(upper, lower);
   assert.equal((await state.call('POST', { body: { id: upper, ...ORIGINAL } })).code, 201);
   // 수정하기 전에, 만들 때 남은 사본이 소문자 ID 기준으로 맞게 저장됐는지 먼저 본다
-  const created = state.rows.find(row => row.id === backupRowId(lower));
+  const created = state.backups.find(copy => copy.note_id === lower);
   assert.ok(created, '소문자 ID 기준 사본 행이 없음');
-  assert.equal(JSON.parse(created.content).id, lower);
+  assert.equal(created.content_hash, hash);
   assert.equal((await state.call('PUT', { id: lower, body: { title: '변조', body: '변조' } })).code, 200);
   const [result] = await quiet(() => state.restore({ id: lower }));
   assert.equal(result.code, 200);
