@@ -3,7 +3,7 @@
 const STARTER_MARKER = 'SAMPLE_NOTE_1';
 
 export async function runAttackChecks(config) {
-  if (![2, 3, 4, 5, 6, 7].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![2, 3, 4, 5, 6, 7, 8].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -112,6 +112,8 @@ async function apiChecks(app, config) {
       observed: '미실행: 미등록 기기 공격은 심판이 맡으며 이 점검은 그런 요청을 보내지 않음. npm run decider:test는 가상 요청 연습일 뿐임' }] : []),
     ...(config.step >= 6 ? [{ attackId: 'step_up_reauth', expected: '복합 이상 접속은 다시 로그인하기 전 자료가 막히고, 새 로그인 뒤 요청은 다시 판정되어 허용됨',
       observed: '미실행: 엔진이 같은 로그인으로 다시 로그인한 시각을 확인하는 계약이 아직 없음(docs/DECIDER_REQUEST.md에는 stepUp 값만 있음). 실제 자료 차단은 시험하지 않음. npm run decider:test는 가상 요청 연습일 뿐임' }] : []),
+    ...(config.step >= 8 ? [{ attackId: 'cross_zone_direct_api', expected: '메뉴를 우회해 B 로그인으로 A의 메모 id를 직접 요청하면 404로 거부되고, 일반 학생의 공지 수정은 거부됨',
+      observed: '미실행: 이 점검은 A·B 로그인 계정을 쓰지 않고 공지 자료·주소도 없음. 판정기의 구역 규칙은 npm run decider:test와 가짜 DB 시험으로만 확인했으며 심판의 판정이 아님' }] : []),
     { attackId: 'normal_login_crud', expected: 'A 계정 로그인 뒤 메모 추가·수정·삭제가 되고 로그아웃 뒤에는 자료가 사라짐',
       observed: '미실행: 이 점검은 로그인 계정을 쓰지 않음. 학생이 화면에서 직접 확인해야 함' },
   ];

@@ -174,3 +174,13 @@
 - 아직 아닌 것: 엔진이 같은 로그인으로 다시 로그인한 시각을 확인하는 계약이 `docs/DECIDER_REQUEST.md`에 없어서, 다시 로그인하기 전 자료 차단과 새 로그인 뒤 허용은 실측하지 못했습니다. `src/attack-check.mjs`의 `step_up_reauth`는 **미실행**입니다. `decide()`를 부르는 곳은 시험 스크립트뿐이고 `/api/notes`는 판정기와 연결되어 있지 않습니다. `step_up_required`가 운영 등록부의 허용 이유 코드에 있는지도 확인하지 못했습니다.
 - 설정: `aleph.config.json`의 `step`은 7이고, 빌드와 `attack-check.mjs`의 단계 목록에 7을 더했습니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`allowedRoutes`·`originalApiUrl`은 바꾸지 않았습니다.
 - 제출 묶음: 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음). 이전 5단계 ①~④ 배포 확인은 여전히 하지 않았습니다.
+
+## 8단계 저장점: 자료마다 갈 수 있는 구역을 나눕니다
+
+- 자원 ID: `src/resources.mjs`가 메모는 `note:<uuid>`(목록·추가는 `note:collection`), 강사 공지는 `announcement:<uuid>`로 서로 겹치지 않게 정합니다. `src/notes-handler.mjs`가 요청마다 서버가 확인한 경로에서만 `request.resourceId`를 계산하며, 응답과 주소는 바뀌지 않았습니다. 이 값을 읽는 코드는 아직 없습니다.
+- 판정기 구역 규칙: `RULE_IDS`는 `device_registered`, `step_up_required`, `zone_notes_own_route`, `zone_announcement_edit`, `zone_unknown_route`입니다. 등록 기기의 자기 메모 한 건 경로 `GET·PUT /notes/:id`와 앱 경로 `/api/notes/:id`(`:id`는 한 칸짜리 ID, `export` 같은 기능 이름은 ID가 아님, `queryLength` 0)만 허용합니다. 여러 사람의 메모를 여는 전체 목록(`GET /notes`, `GET /api/notes`)은 판정기가 주인을 몰라 열지 않습니다. `PUT /announcements/:id`와 표에 없는 메서드·경로·깊이(`/notes/export` 포함)·쿼리는 `deny`와 이유 코드 `zone_not_allowed`입니다. 이 이유 코드가 운영 등록부의 허용 코드에 있는지, 경로 모양이 실제 엔진과 같은지는 확인하지 못했습니다.
+- 자기 메모인지는 판정기가 판정하지 못합니다. 요청 계약에 메모 주인과 사용자 역할이 없고 `subjectId`는 가명이기 때문입니다. 이 구분은 서버 함수(`src/notes-handler.mjs`)가 검증된 사용자 ID와 DB의 `owner_id`를 비교해 맡습니다. 남의 메모·주인 없는 메모·없는 메모는 같은 `404`이고, 거부 사유(`unauthenticated`, `not_found`, `not_owner`, `no_owner`, `owner_changed`)는 서버 로그에 짧은 코드로만 남습니다(ID·토큰·본문 없음).
+- 강사 권한: 강사임을 확인할 저장값이 이 저장소와 시작 틀(`ChoiTimo/aleph-defense-starter`)에 없고 계약에도 없습니다. 그래서 강사 공지 수정은 누구에게도 허용하지 않으며, 공지 자료·주소는 만들지 않았습니다. 판정기는 아직 `/api/notes`와 연결되어 있지 않습니다.
+- 설정: `aleph.config.json`의 `step`은 8이고 빌드와 `attack-check.mjs`의 단계 목록에 8을 더했습니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`allowedRoutes`·`originalApiUrl`은 바꾸지 않았습니다. 연습 자료 `scripts/fixture-7.mjs`의 경로는 UUID 모양으로 바꿨습니다.
+- 다시 실행: `npm ci` 뒤 `npm run decider:test`(「통과」 여덟 줄), `node --test test/*.test.mjs`(가짜 DB·가짜 로그인 검사기, 심판 판정이 아님)입니다. 제출 묶음은 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).
+- `src/attack-check.mjs`: `cross_zone_direct_api`를 **미실행**으로 더했습니다. A·B 로그인 계정을 쓰지 않아서입니다. 5단계 ①~④와 이전 미실행 항목, 실제 배포 화면의 A·B 확인은 여전히 하지 않았습니다.

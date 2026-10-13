@@ -38,6 +38,19 @@ export async function checkDecider({ decide, ruleIds }) {
       decision: 'allow' },
     );
   }
+  if (ruleIds.includes('zone_notes_own_route')) {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const at = (method, route, path, extra = {}) => ({ ...normal, requestId: randomUUID(), method, route, path, ...extra });
+    checks.push(
+      { name: '메모 한 건 수정', request: at('PUT', 'PUT /notes/:id', `/notes/${id}`), decision: 'allow' },
+      { name: '강사 공지 수정(강사 확인 불가)', request: at('PUT', 'PUT /announcements/:id', `/announcements/${id}`),
+        decision: 'deny', reasonCode: 'zone_not_allowed' },
+      { name: '같은 깊이의 export 경로', request: at('GET', 'GET /notes/:id', '/notes/export'),
+        decision: 'deny', reasonCode: 'zone_not_allowed' },
+      { name: '쿼리가 붙은 요청', request: at('GET', 'GET /notes/:id', `/notes/${id}`, { queryLength: 8 }),
+        decision: 'deny', reasonCode: 'zone_not_allowed' },
+    );
+  }
   const results = [];
   for (const item of checks) {
     const response = await decide(item.request);
