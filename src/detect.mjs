@@ -37,7 +37,7 @@ export function readEvents(events) {
 // 규칙 하나: 같은 사용자의 GET이 어느 10분 구간에서 120건을 넘고(정확히 120건은 제외),
 // 그 구간 안에 network가 'unusual'인 사건이 함께 있을 때만 의심으로 봅니다.
 // 다량 조회만, 또는 낯선 네트워크만으로는 보지 않습니다. 의심이 없으면 null입니다.
-function findSuspicious(read) {
+function findBurst(read, requireUnusual = false) {
   const bySubject = new Map();
   for (const event of read) {
     if (event.method !== 'GET') continue;
@@ -54,18 +54,33 @@ function findSuspicious(read) {
         if (list[start].network === 'unusual') unusual -= 1;
         start += 1;
       }
-      if (end - start + 1 > BURST_LIMIT && unusual > 0) return { subject, window: list.slice(start, end + 1) };
+      if (end - start + 1 > BURST_LIMIT && (!requireUnusual || unusual > 0)) return { subject, window: list.slice(start, end + 1) };
     }
   }
   return null;
 }
 
-// 의심 표시입니다. 회수 제안이 아닙니다.
-export function detect(events) {
+const findSuspicious = read => findBurst(read, true);
+
+// 복합 의심 표시(회수 제안이 아님): 다량 조회와 낯선 네트워크가 함께일 때만 flag_suspicious입니다.
+export function flagSuspicious(events) {
   const found = findSuspicious(readEvents(events).events);
   return found
     ? { action: 'flag_suspicious', reasonCode: 'burst_unusual_network', subject: found.subject }
     : { action: 'observe' };
+}
+
+// docs/DETECT_EVENTS.md 계약: 같은 sub의 GET이 어느 10분 구간에서든 120건을 넘으면(정확히 120건은 제외)
+// { action: 'propose_revocation', reasonCode: 'burst_read', subject }를 돌려줍니다. 그 밖에는 observe입니다.
+// 구간의 모든 사건이 등록 기기(deviceId, deviceRegistered true) 하나에서 왔을 때만 deviceId를 덧붙입니다.
+// 계약 모양의 사건에는 기기 칸이 없으므로 그대로 세 칸입니다. 회수를 실행하거나 시각을 만들지 않습니다.
+export function detect(events) {
+  const found = findBurst(readEvents(events).events);
+  if (!found) return { action: 'observe' };
+  const devices = new Set(found.window.map(event => event.deviceId));
+  const proposal = { action: 'propose_revocation', reasonCode: 'burst_read', subject: found.subject };
+  if (devices.size === 1 && !devices.has(null)) proposal.deviceId = [...devices][0];
+  return proposal;
 }
 
 // 별도 결과: 의심 구간의 모든 사건이 같은 등록 기기(deviceId, deviceRegistered true) 하나에서 왔을 때만

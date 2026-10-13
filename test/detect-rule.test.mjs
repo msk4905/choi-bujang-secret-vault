@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detect } from '../src/detect.mjs';
+import { flagSuspicious as detect } from '../src/detect.mjs';
 
 const START = Date.UTC(2026, 9, 1, 0, 0, 0);
 function reads(count, { owner = 'learner_fixture', network, region, step = 2, start = START, unusualAt = [] } = {}) {
