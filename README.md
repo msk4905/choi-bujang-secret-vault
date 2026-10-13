@@ -196,9 +196,9 @@
 - `src/attack-check.mjs`: `detect_revocation_proposal`을 **미실행**으로 더했습니다. 5단계 ①~④, A·B 로그인 확인, 이전 미실행 항목도 여전히 하지 않았습니다.
 - 제출 묶음: 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).
 
-## 10단계 작업: 비공개 사본에서 메모 한 건만 복원 (저장점 아님)
+## 10단계 작업: 비공개 사본에서 메모 한 건만 복원
 
-- 서비스·경로: 기존 메모 서버 함수 `/api/notes`(새 함수 파일 없음)의 `POST /api/notes/:id/restore`입니다. `vercel.json`이 `/api/notes/:id/restore`를 `/api/notes?id=:id&restore=1`로 넘기고, 이 경로는 POST만 받습니다. `aleph.config.json`의 `allowedRoutes`에 같은 경로를 더했고 `restoreRoute`에도 적었습니다(`restoreRoute`의 적는 형식이 운영 측 양식과 같은지는 확인하지 못했습니다). `step`은 올리지 않았습니다.
+- 서비스·경로: 기존 메모 서버 함수 `/api/notes`(새 함수 파일 없음)의 `POST /api/notes/:id/restore`입니다. `vercel.json`이 `/api/notes/:id/restore`를 `/api/notes?id=:id&restore=1`로 넘기고, 이 경로는 POST만 받습니다. `aleph.config.json`의 `allowedRoutes`에 같은 경로를 더했고 `restoreRoute`에도 적었습니다(`restoreRoute`의 적는 형식이 운영 측 양식과 같은지는 확인하지 못했습니다). `step`은 10단계 저장점에서 10으로 올렸습니다.
 - 사본: Supabase의 비공개 표 `public.notes_backup`(서버 전용 키로만 읽음, 브라우저 권한 없음)입니다. 사본 자료와 SQL 결과는 이 저장소에 두지 않습니다. 표는 학생이 SQL Editor에서 직접 만들며, 아래 SQL에는 메모 내용이 없습니다. 이 저장소에서는 실제 DB에 접속하지 않아 표가 있는지, SQL이 그대로 실행되는지 확인하지 못했습니다.
 - 요청: 로그인한 사용자의 `Authorization: Bearer` 토큰과 본문 `{"contentSha256":"<64자리 소문자 16진수>"}`뿐입니다. 소유자는 서버가 확인한 로그인 결과만 쓰고 본문의 `owner_id`·`userId` 같은 값은 읽지 않습니다.
 - 대조: 복원 전에 사본의 ID가 요청한 ID와, 사본의 `owner_id`가 확인된 사용자와, 사본 내용의 해시가 사본에 적힌 해시 및 요청한 해시와 모두 같아야 합니다. 복원 뒤에는 되살린 행을 다시 읽어 ID·소유자·내용 해시가 사본과 같은지 확인하고, 다르면 `502 RESTORE_UNVERIFIED`입니다. 해시는 `sha256(제목 UTF-8 바이트 + 0x00 + 본문 UTF-8 바이트)`의 소문자 16진수입니다.
@@ -276,4 +276,14 @@ revoke all on public.notes_backup from public, anon, authenticated;
 
 - 보너스 1 `xdr/brute-force/respond.mjs`: 규칙을 합칠 때 규칙 이름 접두어를 가리지 않아, 다시 실행하면 같은 파일의 웹 주입 규칙까지 모두 지우던 결함을 고쳤습니다. 수정 전 코드를 임시 폴더 복사본에서 돌렸더니 규칙이 16개에서 9개로 줄고 웹 주입 규칙 7개가 사라졌습니다. 이제 `xdr.brute-force.deny.` 규칙만 고치고 다른 모듈 규칙은 만료된 것도 그대로 둡니다. 시험은 `node --test test/xdr-respond-merge.test.mjs`(임시 폴더만 씀)입니다. 이미 사라진 규칙은 이 수정으로 돌아오지 않습니다(필요하면 `npm run xdr:run -- web-injection` 뒤 `node xdr/web-injection/respond.mjs`).
 - `package/POLICIES.md`: 6~8단계에서 비워 둔 규칙 표를 실제로 구현한 규칙과 확인 방법으로 채웠습니다(확인은 로컬 시험이며 배포·심판 결과가 아님).
-- `src/attack-check.mjs`: `step`이 10일 때 토큰 없는 `POST /api/notes/:id/restore`가 `401`인지 보내 보는 점검과, A·B 로그인이 필요한 복원 점검 두 개(미실행)를 더했습니다. `aleph.config.json`의 `step`은 아직 9이므로 지금은 실행되지 않습니다. 단계를 10으로 올릴 때 `build-public.mjs`·`deployment-identity.mjs`의 단계 목록과 `test/r5.test.mjs`의 '지원하지 않는 단계' 시험도 함께 옮겨야 합니다.
+- `src/attack-check.mjs`: `step`이 10일 때 토큰 없는 `POST /api/notes/:id/restore`가 `401`인지 보내 보는 점검과, A·B 로그인이 필요한 복원 점검 두 개(미실행)를 더했습니다. `step`을 10으로 올린 10단계 저장점부터 실행됩니다. 이때 `build-public.mjs`·`deployment-identity.mjs`의 단계 목록에 10을 더하고 `test/r5.test.mjs`의 '지원하지 않는 단계' 시험을 11로 옮겼습니다.
+
+## 10단계 저장점: 백업에서 자료실을 되살립니다
+
+- 작동하는 것(코드 시험 기준): ① `POST /api/notes/:id/restore`가 비공개 사본 `notes_backup`의 ID·소유자·내용 해시를 요청·로그인 결과와 대조한 뒤 메모 한 건만 되살리고, 복원 뒤 다시 읽어 확인합니다(다른 메모와 사본 표는 그대로). ② `npm run policy:diff`는 검증본과 현재 시험 정책의 차이만 보여 주고, `npm run policy:restore`는 미리보기와 확인 코드를 거쳐서만 검증본 모듈의 규칙을 되돌립니다(다른 모듈 규칙은 보존하고 `xdr/alerts.log`에는 한 줄만 덧붙임). 두 절의 자세한 설명은 위 '10단계 작업'과 '정책 사본 되돌리기'에 있습니다. 1~9단계 기능은 그대로입니다.
+- 설정 대조: `aleph.config.json`의 `step`은 10, `allowedRoutes`는 일곱 경로(`POST /api/notes/:id/restore` 포함, `test/notes-restore.test.mjs`가 `vercel.json`과 대조), `restoreRoute`는 `POST /api/notes/:id/restore`(형식이 운영 측 양식과 같은지는 미확인)입니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`identityProvider`·`originalApiUrl`은 바꾸지 않았습니다. `RULE_IDS`는 실제로 구현한 다섯 개(`device_registered`, `step_up_required`, `zone_notes_own_route`, `zone_announcement_edit`, `zone_unknown_route`) 그대로입니다. 복원 경로는 서버 함수의 소유자·해시 대조이고 판정기 규칙이 아닙니다.
+- 단계 목록: `build-public.mjs`·`deployment-identity.mjs`에 10을 더했고, `test/r5.test.mjs`의 '지원하지 않는 단계' 시험은 11로 옮겼습니다.
+- 다시 실행: `npm ci` 뒤 `node --test test/*.test.mjs`(2026-10-13 로컬 89건 중 89건 통과, 가짜 DB·가짜 로그인 검사기·임시 폴더 기준이며 심판 판정이 아님), `npm run decider:test`, `npm run detect:test`, `npm run policy:diff`, `npm run build -- --local`. 복구 뒤 1~9단계를 다시 확인하는 순서는 위 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서'를 따릅니다.
+- `src/attack-check.mjs`: 10단계 항목으로 토큰 없는 `POST /api/notes/:id/restore`가 `401`인지 실제로 보내는 점검(`anonymous_api_restore`)을 더했습니다. 로그인이 필요한 `restore_cross_owner`·`restore_normal_one_note`는 **미실행**으로 남습니다. 실제로 보낸 요청의 상태 코드만 기록하며 심판의 판정이 아닙니다.
+- 미실행으로 남은 것: 실제 Supabase의 `notes_backup` 표 생성과 사본 복원, 실제 `xdr/deny-rules.json`에 `policy:restore -- --apply` 적용, A·B 두 계정의 배포 화면 확인, 5단계 ①~④, 미등록 기기 공격과 재로그인 뒤 허용(6·7단계), 반 엔진의 사건 전달·접속 회수(9단계). 배포 주소가 이 커밋을 배포하기 전이면 이전 코드일 수 있습니다.
+- 제출 묶음: 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).
