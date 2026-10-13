@@ -175,7 +175,8 @@ test('확인과 쓰기 사이에 소유자가 바뀌어도 남의 행은 고치�
     builder.delete = () => { rows[0].owner_id = B; return originalDelete(); };
     return builder; } };
   let first = true;
-  const handler = createNotesHandler({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: { from: () => (first ? (first = false, db.from()) : racing.from()) } }) });
+  const handler = createNotesHandler({ getDeps: () => ({ verify: async auth => people[auth] ?? null, db: { from: () => (first ? (first = false, db.from()) : racing.from()) } }),
+    saveBackup: async () => {} }); // 이 시험은 소유자 경합만 봅니다. 사본 저장은 notes-restore.test.mjs가 시험합니다.
   const send = method => new Promise(resolve => handler({ method, query: { id: rows[0].id }, headers: { authorization: 'Bearer token-a' }, body: { title: 'x', body: 'y' } },
     { setHeader() {}, status: code => ({ json: () => resolve(code), end: () => resolve(code) }) }));
   assert.equal(await send('PUT'), 404);

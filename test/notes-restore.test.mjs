@@ -24,7 +24,8 @@ function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWri
       let action = 'select';
       let patch = null;
       const run = () => {
-        const hit = rows.filter(row => filters.every(([k, v]) => row[k] === v));
+        const norm = (k, v) => (k === 'id' && typeof v === 'string' ? v.toLowerCase() : v); // uuid 칸은 대소문자를 구분하지 않음
+        const hit = rows.filter(row => filters.every(([k, v]) => norm(k, row[k]) === norm(k, v)));
         if (action === 'select') return hit.map(row => ({ ...row }));
         writes.push(action);
         if (action === 'update') {
@@ -46,6 +47,7 @@ function fakeDb(rows, writes, { dropWrites = false, corruptWrites = false, onWri
         delete() { action = 'delete'; return builder; },
         insert(row) {
           if (failInsertFor && failInsertFor(row)) return Promise.resolve({ error: { code: 'XX000' } });
+          row = { ...row, id: typeof row.id === 'string' ? row.id.toLowerCase() : row.id };
           if (rows.some(item => item.id === row.id)) return Promise.resolve({ error: { code: '23505' } });
           writes.push('insert');
           if (!dropWrites) rows.push({ ...row });
@@ -334,6 +336,59 @@ test('B의 메모를 지우고 복구한 직후에도 3·4·8단계 대표 공�
   // 복구된 B 메모는 처음 내용 그대로이고 A의 메모는 바뀌지 않았다
   assert.equal(noteHash(live(state.rows).title, live(state.rows).content), hash);
   assert.equal(live(state.rows, A_NOTE).content, 'A 내용');
+});
+
+// 사본이 없던 옛 메모(이 기능 이전에 만들어 사본이 없음)를 직접 넣는다.
+const legacy = (state, id = B_NOTE) => state.rows.push({ id, title: ORIGINAL.title, content: ORIGINAL.body, owner_id: B });
+
+test('사본이 없던 옛 메모도 처음 변조되기 직전 상태가 사본으로 남아 변조 뒤 복구된다', async () => {
+  const state = setup();
+  legacy(state);
+  const [noBackup] = await quiet(() => state.restore());
+  assert.equal(noBackup.code, 404); // 아직 한 번도 고치지 않았으면 사본이 없다
+  assert.equal((await state.call('PUT', { id: B_NOTE, body: { title: '변조된 제목', body: '변조된 내용' } })).code, 200);
+  assert.equal(state.rows.filter(row => row.owner_id === backupOwnerId(B)).length, 1);
+  assert.equal((await state.call('PUT', { id: B_NOTE, body: { title: '두 번째 변조', body: '또 변조' } })).code, 200);
+  const copy = JSON.parse(state.rows.find(row => row.id === backupRowId(B_NOTE)).content);
+  assert.equal(copy.sha256, hash); // 두 번째 변조가 사본을 덮어쓰지 못함
+  const [result] = await quiet(() => state.restore());
+  assert.deepEqual([result.code, result.json.restored, result.json.verified], [200, 'updated', true]);
+  const row = live(state.rows);
+  assert.equal(noteHash(row.title, row.content), hash);
+});
+
+test('사본이 없던 옛 메모를 지워도 직전 상태가 사본으로 남아 되살릴 수 있다', async () => {
+  const state = setup();
+  legacy(state);
+  assert.equal((await state.call('DELETE', { id: B_NOTE })).code, 204);
+  const [result] = await quiet(() => state.restore());
+  assert.deepEqual([result.code, result.json.restored], [201, 'created']);
+  const row = live(state.rows);
+  assert.deepEqual([row.owner_id, noteHash(row.title, row.content)], [B, hash]);
+});
+
+test('수정 직전 사본을 남기지 못해도 수정은 그대로 성공한다', async () => {
+  const state = setup({ failInsertFor: row => row.owner_id === backupOwnerId(B) });
+  legacy(state);
+  const [result] = await quiet(() => state.call('PUT', { id: B_NOTE, body: { title: '새 제목', body: '새 내용' } }));
+  assert.equal(result.code, 200);
+  assert.equal(live(state.rows).title, '새 제목');
+});
+
+test('대문자로 보낸 메모 ID로 만들어도 사본이 맞게 남아 복구된다', async () => {
+  const state = setup();
+  const lower = 'abcdefab-cdef-4cde-8fab-cdefabcdefab'; // 16진수 글자가 있어 대문자로 바꾸면 달라지는 ID
+  const upper = lower.toUpperCase();
+  assert.notEqual(upper, lower);
+  assert.equal((await state.call('POST', { body: { id: upper, ...ORIGINAL } })).code, 201);
+  // 수정하기 전에, 만들 때 남은 사본이 소문자 ID 기준으로 맞게 저장됐는지 먼저 본다
+  const created = state.rows.find(row => row.id === backupRowId(lower));
+  assert.ok(created, '소문자 ID 기준 사본 행이 없음');
+  assert.equal(JSON.parse(created.content).id, lower);
+  assert.equal((await state.call('PUT', { id: lower, body: { title: '변조', body: '변조' } })).code, 200);
+  const [result] = await quiet(() => state.restore({ id: lower }));
+  assert.equal(result.code, 200);
+  assert.equal(noteHash(live(state.rows, lower).title, live(state.rows, lower).content), hash);
 });
 
 test('vercel.json 주소 변환과 허용 경로가 구현과 맞다', () => {
