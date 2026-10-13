@@ -12,6 +12,7 @@ import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from './verify-login.mjs';
 import { noteResourceId } from './resources.mjs';
 import { readRestoreInput, restoreNote, saveBackup } from './notes-restore.mjs';
+import { traceAnonymous, traceJudge } from './judge-trace.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_TITLE = 200;
@@ -73,11 +74,16 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, save
     try { principal = await deps.verify(request.headers?.authorization); } catch {
       console.error('login verifier failed');
     }
+    const label = isRestore ? 'restore' : hasId ? 'item' : 'collection';
     if (!principal) {
+      traceAnonymous(request, label);
       logDenied(request, 'unauthenticated');
       response.setHeader('WWW-Authenticate', 'Bearer');
       return response.status(401).json({ error: 'UNAUTHENTICATED' });
     }
+
+    // 심판의 요청은 모양만 서버 로그에 남깁니다(값 없음). 동작은 바꾸지 않습니다. 학생 본인의 요청은 기록하지 않습니다.
+    if (principal.kind === 'judge') traceJudge(request, principal, response, label);
 
     if ((hasId || isRestore) && (typeof rawId !== 'string' || !UUID.test(rawId))) {
       return response.status(400).json({ error: 'INVALID_ID' });
