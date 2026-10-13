@@ -220,3 +220,34 @@ revoke all on public.notes_backup from public, anon, authenticated;
 - 확인 순서(학생이 배포 주소에서, 아직 하지 않음): ① B로 로그인해 메모를 하나 만들고 위 SQL로 사본을 만듭니다. ② 앱에서 그 메모를 지우거나 고칩니다. ③ B 토큰으로 `POST /api/notes/<id>/restore`에 해시를 보내 `201` 또는 `200`을 받고, 메모가 사본 내용으로 돌아왔는지 봅니다. 정상: `verified: true`. 거부되어야 할 결과: 해시를 한 글자 바꾸면 `409`, A 토큰이면 `404`이고 메모는 바뀌지 않아야 합니다.
 - 코드 시험: `npm ci` 뒤 `node --test test/notes-restore.test.mjs`(가짜 DB·가짜 로그인 검사기)와 `node --test test/*.test.mjs`입니다. 시험 계정 B의 가상 메모만 복원 대상으로 썼고, A는 B의 메모를 요청했을 때 거부되는지 보는 요청자로만 나옵니다. 실제 Supabase·배포 확인이 아니며 심판 판정이 아닙니다.
 - 아직 아닌 것: 판정기(`src/decider.mjs`)는 이 경로와 연결되어 있지 않고 `RULE_IDS`는 그대로입니다. `src/attack-check.mjs`에는 이 경로의 점검을 더하지 않았습니다(미실행). 사본 표에는 소유자별 접근 정책이 없고 서버 전용 키로만 읽으므로, 접근 구분은 위 소유자 대조가 맡습니다. 사본을 만드는 일은 학생의 SQL 실행이며 서버 경로로 만들지 않았습니다.
+
+## 복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서
+
+복구(위 `policy:restore`나 메모 복원) 직후에 아래 순서로 다시 확인합니다. 결과 칸은 실제로 실행한 것만 적었고, 실행하지 않은 것은 **미실행**입니다. 로컬 시험은 가짜 DB·가짜 로그인 검사기·가상 요청이라 실제 Supabase·배포·심판의 결과가 아닙니다. `<…>`와 `$TOKEN_B`·`$TOKEN_A`는 학생이 채우며, 토큰은 앱 화면에서 복사해 터미널 변수로만 쓰고 대화·Git·README에 붙이지 않습니다.
+
+### 0. 복구된 것 확인 (자료와 정책이 돌아왔는가)
+
+| 확인 | 명령·행동 | 정상 | 거부·실패면 | 결과 |
+|---|---|---|---|---|
+| 정책이 검증본과 같음 | `npm run policy:diff` | 「차이 없음」, 종료 코드 0 | 「다시 생김/사라짐/바뀜」이나 「중단」이면 `npm run policy:restore`의 미리보기부터 | 2026-10-13 04:57 UTC 실행: 차이 없음(규칙 16개). 복구 절차 자체는 실제 파일에 적용하지 않음 |
+| 메모 한 건이 사본 그대로 돌아옴 | B 토큰으로 `POST /api/notes/<B 메모 id>/restore` 본문 `{"contentSha256":"<사본 해시>"}` | `verified: true`, 이어서 B의 `GET /api/notes`에 그 메모가 보임 | 해시를 한 글자 바꾸면 `409`, A 토큰이면 `404`이고 메모가 바뀌지 않아야 함 | 코드 시험만 실행(아래 4단계 줄). 실제 배포·DB: **미실행** |
+
+### 1~9단계 다시 실행
+
+각 줄의 「로컬」은 저장소에서, 「배포」는 `aleph.config.json`의 `publicAppUrl`에서 하는 확인입니다. 배포 주소가 `main`을 보고 있으면 이 브랜치의 변경 전 코드일 수 있어, 확인 전에 어떤 커밋이 배포됐는지 먼저 봅니다.
+
+| 단계 | 정상 요청 | 금지 요청 | 로컬 결과 | 배포 결과 |
+|---|---|---|---|---|
+| 1 공개 틀 | 배포 `/` 화면이 열림(`curl -s -o /dev/null -w "%{http_code}\n" https://<배포 주소>/`) | 1단계의 공개 가상 메모는 2단계부터 의도적으로 없앴으므로, 복구 뒤에도 `/data.json`이 `{ "notes": [] }`이어야 함 | `npm run build -- --local` 실행: 성공, `public/data.json` 변화 없음 | **미실행** |
+| 2 코드 밖으로 | `curl -s https://<배포 주소>/data.json` → `{ "notes": [] }` | `git grep -n "실습용 가상" -- . ':!README.md'` 출력 없음, 배포 `/data.json`에 같은 글자 `grep -c` 가 `0` | `git grep` 실행: 출력 없음(종료 코드 1) | `curl`: **미실행** |
+| 3 로그인 | A로 로그인해 메모 추가·수정·삭제, 로그아웃 뒤 목록이 사라짐 | 토큰 없는 `curl -s -o /dev/null -w "%{http_code}\n" https://<배포 주소>/api/notes` → `401`(POST·PUT·DELETE도 `401`) | `node --test test/notes-api.test.mjs test/r5.test.mjs` 포함 전체 실행: 통과 | A 로그인 화면 확인·`curl`: **미실행** |
+| 4 소유자 | 본인 토큰으로 본인 메모 `GET·PUT·DELETE /api/notes/<id>` 성공 | B 토큰(`$TOKEN_B`)으로 A의 메모 id 요청 → `404`, 소유자 변경 시도도 거부 | 전체 시험 통과(가짜 DB의 A·B 시험 포함) | A·B 두 계정 실제 확인: **미실행** |
+| 5 서버 함수로만 | 화면이 `/api/config`에서 공개 설정을 받아 로그인하고 자료는 `/api/notes`로만 읽음 | 공개 키(`apikey` 헤더)만으로 `aleph.config.json`의 `originalApiUrl`을 요청 → `401`·`403`(`200`이면 실패) | `node --test test/config-api.test.mjs test/r5.test.mjs` 포함 전체 실행: 통과 | 5단계 ①~④ 배포 확인: **미실행** |
+| 6 등록 기기 | `npm run decider:test` 첫 줄 「통과 · 등록 기기의 정상 요청」(`allow`) | 「통과 · 미등록 기기의 가상 요청」(`deny`, `device_not_registered`) | 2026-10-13 04:57 UTC 실행: 여덟 줄 모두 「통과」 | 미등록 기기 실제 공격은 심판 몫: **미실행** |
+| 7 평소와 다른 접속 | `npm run fixture:7`의 정상 사건 `allow` | 복합 이상 사건 `step_up`, 다시 확인한 요청만 `allow`(`decider:test` 3·4번째 줄) | `fixture:7` 실행: 정상 `allow`, 복합 이상 `step_up` | 다시 로그인 전 자료 차단·새 로그인 뒤 허용: **미실행**(계약에 없음) |
+| 8 구역 | 자기 메모 한 건 경로(`GET·PUT /notes/:id`)만 허용(`decider:test` 5번째 줄 「메모 한 건 수정」) | 강사 공지 수정, `export` 경로, 쿼리가 붙은 요청 거부(`decider:test` 6~8번째 줄), 배포에서 B가 A의 id를 직접 요청 → `404` | `decider:test` 위 여덟 줄 통과, `node --test test/zones.test.mjs` 포함 전체 통과 | 배포 직접 요청: **미실행** |
+| 9 탐지 | `npm run detect:test` 정상 조회 30건·정확히 120건은 `observe` | 121건·폭주 200건은 `propose_revocation`, 서로 다른 사용자 100건씩·10분 밖으로 흩어진 200건은 제안 없음 | `detect:test` 실행: 여섯 줄 모두 「통과」 | 반 엔진의 사건 전달·접속 회수: **미실행** |
+
+- 전체 코드 시험: `npm ci` 뒤 `node --test test/*.test.mjs`. 2026-10-13 04:57 UTC에 85건 중 85건 통과, 실패 0건이었습니다. 이 시험은 위 로컬 열의 근거이며 배포나 심판 결과가 아닙니다.
+- `npm run bundle`은 배포 주소로 토큰 없는 GET·POST·PUT·DELETE와 위조 토큰 요청을 실제로 보내 상태 코드만 기록하는 자기 점검(`src/attack-check.mjs`)을 포함하고, 변경을 모두 커밋한 뒤에만 실행합니다. 이번 복구 뒤에는 **미실행**입니다. 이 점검은 A·B 로그인 요청을 보내지 않아 4·6·8·9단계 항목은 계속 「미실행」으로 남습니다.
+- 한 곳이라도 정상 요청이 거부되거나 금지 요청이 통과하면 거기서 멈추고, 그 줄의 첫 출력과 이번에 바뀐 파일만 근거로 한 가지만 고칩니다.
