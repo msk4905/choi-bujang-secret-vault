@@ -51,7 +51,7 @@ export function loadCurrent(root) {
   return parsePolicy(text, '현재 시험 정책');
 }
 
-const moduleOf = (ruleId) => ruleId.split('.').slice(0, 2).join('.');
+export const moduleOf = (ruleId) => ruleId.split('.').slice(0, 2).join('.');
 const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // 복원하면 생길 변화입니다. restore: 검증본에만 있어 다시 생길 규칙, remove: 현재에만 있어 사라질 규칙, change: 내용이 달라 검증본 값으로 바뀔 규칙.
