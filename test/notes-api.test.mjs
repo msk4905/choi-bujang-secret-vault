@@ -45,6 +45,7 @@ function setup() {
   const handler = createNotesHandler({
     getDeps: () => ({ verify: async auth => people[auth] ?? null, db: fakeDb(rows) }),
     newId: () => '33333333-3333-4333-8333-333333333333',
+    saveBackup: async () => {}, // 이 시험은 소유자 분리와 CRUD만 봅니다. 사본 저장은 notes-restore.test.mjs가 시험합니다.
   });
   return { rows, call: (method, { id, auth, body } = {}) => new Promise(resolve => {
     const headers = {};

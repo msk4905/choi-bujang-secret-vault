@@ -199,27 +199,15 @@
 ## 10단계 작업: 비공개 사본에서 메모 한 건만 복원
 
 - 서비스·경로: 기존 메모 서버 함수 `/api/notes`(새 함수 파일 없음)의 `POST /api/notes/:id/restore`입니다. `vercel.json`이 `/api/notes/:id/restore`를 `/api/notes?id=:id&restore=1`로 넘기고, 이 경로는 POST만 받습니다. `aleph.config.json`의 `allowedRoutes`에 같은 경로를 더했고 `restoreRoute`에도 적었습니다(`restoreRoute`의 적는 형식이 운영 측 양식과 같은지는 확인하지 못했습니다). `step`은 10단계 저장점에서 10으로 올렸습니다.
-- 사본: Supabase의 비공개 표 `public.notes_backup`(서버 전용 키로만 읽음, 브라우저 권한 없음)입니다. 사본 자료와 SQL 결과는 이 저장소에 두지 않습니다. 표는 학생이 SQL Editor에서 직접 만들며, 아래 SQL에는 메모 내용이 없습니다. 이 저장소에서는 실제 DB에 접속하지 않아 표가 있는지, SQL이 그대로 실행되는지 확인하지 못했습니다.
-- 요청(2단계): 로그인한 사용자의 `Authorization: Bearer` 토큰으로 두 번 보냅니다. ① 확인 코드 없이 `{}`나 `{"contentSha256":"<64자리 소문자 16진수>"}`를 보내면 **복원할 버전(`version`), 할 일(`action`: `create`·`update`), 바뀔 항목(`willChange`: `title`·`content`)과 `confirm` 코드만 돌려주고 아무것도 쓰지 않습니다**(`preview: true`). ② 같은 해시와 받은 `confirm`을 함께 보내야 씁니다. 이때 사본과 현재 메모를 다시 읽어 코드를 새로 계산하므로, 미리보기 뒤에 사본이나 메모가 바뀌었거나 다른 사용자가 보내면 `409 CONFIRM_MISMATCH`/`404`로 멈춥니다. 소유자는 서버가 확인한 로그인 결과만 쓰고 본문의 `owner_id`·`userId` 같은 값은 읽지 않습니다.
-- 대조: 복원 전에 사본의 ID가 요청한 ID와, 사본의 `owner_id`가 확인된 사용자와, 사본 내용의 해시가 사본에 적힌 해시 및 요청한 해시와 모두 같아야 합니다. 복원 뒤에는 사본과 되살린 행을 새로 읽어 ID·소유자·내용 해시가 같은지 확인하고, 다르면 쓴 내용을 되돌립니다(새로 만든 행은 지우고 고친 행은 이전 제목·내용으로 돌림). 응답은 `502 RESTORE_UNVERIFIED`입니다. 해시는 `sha256(제목 UTF-8 바이트 + 0x00 + 본문 UTF-8 바이트)`의 소문자 16진수입니다.
-- 결과: ②에서 현재 메모가 없으면 새로 만들고(`201`, `restored: "created"`), 같은 ID의 본인 메모가 있으면 사본 내용으로 한 건만 고치며(`200`, `"updated"`), 이미 같으면 쓰지 않습니다(`200`, `"unchanged"`, 확인 코드 불필요). 응답에는 ID·버전·바뀐 항목 이름과 결과만 있고 메모 내용은 싣지 않습니다. 다른 메모와 사본 표는 고치지 않습니다.
-- 거부(아무것도 쓰지 않음): 토큰 없음 `401`, 사본 없음·남의 사본·같은 ID의 현재 메모 주인이 다름 `404 NOT_FOUND`(구별하지 않음), 요청 해시가 다름 `409 HASH_MISMATCH`, 사본 내용이 적힌 해시와 다름 `409 BACKUP_HASH_MISMATCH`, 본문·ID 형식 오류 `400`, POST가 아닌 메서드 `405`. 확인 코드가 틀리거나 미리보기 뒤 사본·메모가 바뀜 `409 CONFIRM_MISMATCH`, 해시 없이 코드만 보냄 `400`.
-- 감사 기록: 이 저장소와 DB 스키마에는 메모용 감사 표가 없어서 새로 만들지 않았습니다. 복원 성공·거부 사유는 서버 로그에 짧은 코드만 남고(`notes restored: created`, `notes restore denied: not_owner` 등) ID·본문·토큰은 싣지 않습니다. 이 복원은 기존 로그나 다른 표를 지우거나 고치지 않습니다. 영구 감사 기록이 필요하면 학생이 표를 정해야 합니다.
-- 학생이 SQL Editor에서 실행할 사본 표(내용 없음):
-
-```sql
-create table public.notes_backup (
-  id uuid primary key, owner_id uuid not null, title text not null, content text not null,
-  content_sha256 text not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
-  backed_up_at timestamptz not null default now());
-alter table public.notes_backup enable row level security;
-revoke all on public.notes_backup from public, anon, authenticated;
-```
-
-- 사본 한 건 만들기(시험 계정 B의 가상 메모 한 건만, `<…>`는 학생이 채움): `insert into public.notes_backup (id, owner_id, title, content, content_sha256) select id, owner_id, title, content, encode(sha256(convert_to(title,'UTF8') || '\x00'::bytea || convert_to(content,'UTF8')),'hex') from public.notes where id = '<B 메모 id>' and owner_id = '<B 사용자 id>';` 그다음 `select content_sha256 from public.notes_backup where id = '<B 메모 id>';`로 해시를 읽어 요청 본문에 넣습니다.
-- 확인 순서(학생이 배포 주소에서, 아직 하지 않음): ① B로 로그인해 메모를 하나 만들고 위 SQL로 사본을 만듭니다. ② 앱에서 그 메모를 지우거나 고칩니다. ③ B 토큰으로 `POST /api/notes/<id>/restore`에 해시만 보내 미리보기(`preview: true`, `version`, `willChange`, `confirm`)를 받고 **메모가 아직 그대로 안 돌아왔는지** 봅니다. ④ 같은 요청에 `confirm`을 붙여 보내 `201` 또는 `200`을 받고, 메모가 사본 내용으로 돌아왔는지 봅니다. 정상: `verified: true`. 거부되어야 할 결과: 해시를 한 글자 바꾸면 `409`, 틀린 `confirm`이면 `409`, A 토큰이면 `404`이고 메모는 바뀌지 않아야 합니다.
-- 코드 시험: `npm ci` 뒤 `node --test test/notes-restore.test.mjs`(가짜 DB·가짜 로그인 검사기)와 `node --test test/*.test.mjs`입니다. 시험 계정 B의 가상 메모만 복원 대상으로 썼고, A는 B의 메모를 요청했을 때 거부되는지 보는 요청자로만 나옵니다. 실제 Supabase·배포 확인이 아니며 심판 판정이 아닙니다.
-- 아직 아닌 것: 판정기(`src/decider.mjs`)는 이 경로와 연결되어 있지 않고 `RULE_IDS`는 그대로입니다. `src/attack-check.mjs`에는 이 경로의 점검을 더하지 않았습니다(미실행). 사본 표에는 소유자별 접근 정책이 없고 서버 전용 키로만 읽으므로, 접근 구분은 위 소유자 대조가 맡습니다. 사본을 만드는 일은 학생의 SQL 실행이며 서버 경로로 만들지 않았습니다.
+- 사본은 서버가 자동으로 남깁니다: 로그인한 사용자가 `POST /api/notes`로 메모를 만들면, 서버가 만든 직후 그 메모의 제목·내용·해시를 검증용 사본으로 한 번 남깁니다. 사본은 `notes` 표 안의 예약 행입니다. 행 ID와 `owner_id`를 (메모 ID, 확인된 사용자 ID)에서 계산한 값으로 두며, 이 값은 로그인 검사가 받는 v4 사용자 ID와 같아질 수 없습니다. 그래서 목록·조회·수정·삭제 API로는 보이지도 고쳐지지도 않고 서버 전용 키로만 읽습니다. 별도 표나 SQL 실행은 필요 없습니다. 사본은 만들 때 한 번만 남기며 이후 수정으로 덮어쓰지 않습니다(침해 전에 검증한 사본). 이미 있으면 그대로 둡니다.
+- 요청: 로그인한 사용자의 `Authorization: Bearer` 토큰으로 `POST /api/notes/<메모 id>/restore`를 **본문 없이 한 번** 보내면 됩니다. 소유자는 서버가 확인한 로그인 결과만 쓰고 본문의 `owner_id`·`userId` 같은 값은 읽지 않습니다. 선택 본문: `{"contentSha256":"<64자리 소문자 16진수>"}`는 사본의 해시와 같을 때만 진행하고(다르면 `409`), `{"dryRun": true}`는 복원할 버전(`version`), 할 일(`action`: `create`·`update`), 바뀔 항목(`willChange`: `title`·`content`)만 돌려주고 **아무것도 쓰지 않습니다**(실행 전 확인).
+- 대조: 사본을 새로 읽어 사본의 행 위치(메모 ID·소유자), 사본 기록 안의 메모 ID·소유자, 사본 내용의 해시가 모두 맞을 때만 진행합니다. 하나라도 어긋나면 쓰지 않고 멈춥니다. 복원 뒤에는 사본과 되살린 행을 다시 새로 읽어 ID·소유자·내용 해시가 같은지 확인하고, 다르면 쓴 내용을 되돌립니다(새로 만든 행은 지우고 고친 행은 이전 제목·내용으로 돌림). 그때 응답은 `502 RESTORE_UNVERIFIED`입니다.
+- 결과: 현재 메모가 없으면 새로 만들고(`201`, `restored: "created"`), 같은 ID의 본인 메모가 있으면 사본 내용으로 한 건만 고치며(`200`, `"updated"`), 이미 같으면 쓰지 않습니다(`200`, `"unchanged"`). 응답에는 ID·버전·바뀐 항목 이름과 결과만 있고 메모 내용은 싣지 않습니다. 다른 메모와 사본은 고치지 않습니다.
+- 거부(아무것도 쓰지 않음): 토큰 없음 `401`, 사본 없음·남의 메모·같은 ID의 현재 메모 주인이 다름 `404 NOT_FOUND`(구별하지 않음), 요청 해시가 다름 `409 HASH_MISMATCH`, 사본이 변조되어 해시가 안 맞음 `409 BACKUP_HASH_MISMATCH`, 본문·ID 형식 오류 `400`, POST가 아닌 메서드 `405`.
+- 감사 기록: 이 저장소와 DB 스키마에는 메모용 감사 표가 없어서 새로 만들지 않았습니다. 복원 성공·미리보기·거부 사유는 서버 로그에 짧은 코드만 남고(`notes restored: updated`, `notes restore denied: no_backup` 등) ID·본문·토큰은 싣지 않습니다. 이 복원은 기존 로그나 다른 메모를 지우거나 고치지 않습니다. 영구 감사 기록이 필요하면 학생이 표를 정해야 합니다.
+- 확인 순서(학생이 배포 주소에서, 아직 하지 않음): ① B로 로그인해 새 메모를 만듭니다(이때 사본이 남습니다). ② 그 메모를 수정하거나 지웁니다. ③ B 토큰으로 `POST /api/notes/<id>/restore`에 본문 `{"dryRun":true}`를 보내 `preview: true`와 `willChange`를 보고 메모가 아직 그대로인지 봅니다. ④ 본문 없이 같은 요청을 보내 `201` 또는 `200`을 받고 메모가 처음 내용으로 돌아왔는지 봅니다. 정상: `verified: true`. 거부되어야 할 결과: 해시를 한 글자 바꿔 보내면 `409`, A 토큰이면 `404`이고 메모가 바뀌지 않아야 합니다.
+- 코드 시험: `npm ci` 뒤 `node --test test/notes-restore.test.mjs`와 `node --test test/*.test.mjs`입니다(가짜 DB·가짜 로그인 검사기). 시험 계정 B의 가상 메모만 복원 대상으로 썼고, A는 B의 메모를 요청했을 때 거부되는지 보는 요청자로만 나옵니다. 실제 Supabase·배포 확인이 아니며 심판 판정이 아닙니다.
+- 한계(확인하지 못한 것 포함): ① 이 변경 전에 만든 메모에는 사본이 없어 복원할 수 없습니다(`404`). 새로 만든 메모부터 해당됩니다. ② 사본은 만들 때 한 번이라, 정상 수정한 내용은 복원하면 처음 내용으로 돌아갑니다. ③ 사본이 `notes` 표의 예약 행이라 서버 전용 키(RLS 우회)를 가진 쪽은 읽을 수 있습니다. API로 보이지 않는다는 뜻의 비공개입니다. ④ 실제 DB에서 `notes.owner_id`에 외래키나 다른 제약이 있으면 사본 저장이 실패할 수 있고, 이때 메모 만들기는 성공하지만 그 메모는 복원되지 않습니다(서버 로그에만 남음). 실제 DB로는 확인하지 못했습니다. ⑤ 판정기(`src/decider.mjs`)는 이 경로와 연결되어 있지 않고 `RULE_IDS`는 그대로입니다. `src/attack-check.mjs`는 토큰 없는 복원 요청이 `401`인지만 보내고 A·B 로그인이 필요한 점검은 미실행입니다.
 
 ## 복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서
 
@@ -230,7 +218,7 @@ revoke all on public.notes_backup from public, anon, authenticated;
 | 확인 | 명령·행동 | 정상 | 거부·실패면 | 결과 |
 |---|---|---|---|---|
 | 정책이 검증본과 같음 | `npm run policy:diff` | 「차이 없음」, 종료 코드 0 | 「다시 생김/사라짐/바뀜」이나 「중단」이면 `npm run policy:restore`의 미리보기부터 | 2026-10-13 04:57 UTC 실행: 차이 없음(규칙 16개). 복구 절차 자체는 실제 파일에 적용하지 않음 |
-| 메모 한 건이 사본 그대로 돌아옴 | B 토큰으로 `POST /api/notes/<B 메모 id>/restore` 해시만 보내 미리보기를 받은 뒤 `confirm`을 붙여 다시 보냄 | 미리보기는 쓰지 않음, 두 번째 요청은 `verified: true`, 이어서 B의 `GET /api/notes`에 그 메모가 보임 | 해시를 한 글자 바꾸면 `409`, 틀린 `confirm`이면 `409`, A 토큰이면 `404`이고 메모가 바뀌지 않아야 함 | 코드 시험만 실행(아래 4단계 줄). 실제 배포·DB: **미실행** |
+| 메모 한 건이 사본 그대로 돌아옴 | B로 메모를 만든 뒤 수정하고, B 토큰으로 `POST /api/notes/<B 메모 id>/restore`를 본문 없이 한 번 보냄(미리 보려면 `{"dryRun":true}`) | `verified: true`, 이어서 B의 `GET /api/notes`에 처음 내용이 보임 | 해시를 한 글자 바꾸면 `409`, A 토큰이면 `404`이고 메모가 바뀌지 않아야 함 | 코드 시험만 실행(아래 4단계 줄). 실제 배포·DB: **미실행** |
 
 ### 1~9단계 다시 실행
 
@@ -280,10 +268,10 @@ revoke all on public.notes_backup from public, anon, authenticated;
 
 ## 10단계 저장점: 백업에서 자료실을 되살립니다
 
-- 작동하는 것(코드 시험 기준): ① `POST /api/notes/:id/restore`가 먼저 복원할 버전과 바뀔 항목만 보여 주고(쓰지 않음), 받은 확인 코드로 다시 보내면 비공개 사본 `notes_backup`의 ID·소유자·내용 해시를 요청·로그인 결과와 대조한 뒤 메모 한 건만 되살리고, 복원 뒤 사본과 되살린 행을 새로 읽어 확인하며 어긋나면 쓴 내용을 되돌립니다(다른 메모와 사본 표는 그대로). ② `npm run policy:diff`는 검증본과 현재 시험 정책의 차이만 보여 주고, `npm run policy:restore`는 미리보기와 확인 코드를 거쳐서만 검증본 모듈의 규칙을 되돌립니다(다른 모듈 규칙은 보존하고 `xdr/alerts.log`에는 한 줄만 덧붙임). 두 절의 자세한 설명은 위 '10단계 작업'과 '정책 사본 되돌리기'에 있습니다. 1~9단계 기능은 그대로입니다.
+- 작동하는 것(코드 시험 기준): ① 메모를 만들 때 서버가 검증용 사본을 남기고, `POST /api/notes/:id/restore`가 본문 없이 한 번 호출돼도 사본을 다시 읽어 ID·소유자·내용 해시를 대조한 뒤 메모 한 건만 되살리며(`dryRun`으로 실행 전에 버전과 바뀔 항목 확인), 복원 뒤 사본과 되살린 행을 새로 읽어 확인하며 어긋나면 쓴 내용을 되돌립니다(다른 메모와 사본 표는 그대로). ② `npm run policy:diff`는 검증본과 현재 시험 정책의 차이만 보여 주고, `npm run policy:restore`는 미리보기와 확인 코드를 거쳐서만 검증본 모듈의 규칙을 되돌립니다(다른 모듈 규칙은 보존하고 `xdr/alerts.log`에는 한 줄만 덧붙임). 두 절의 자세한 설명은 위 '10단계 작업'과 '정책 사본 되돌리기'에 있습니다. 1~9단계 기능은 그대로입니다.
 - 설정 대조: `aleph.config.json`의 `step`은 10, `allowedRoutes`는 일곱 경로(`POST /api/notes/:id/restore` 포함, `test/notes-restore.test.mjs`가 `vercel.json`과 대조), `restoreRoute`는 `POST /api/notes/:id/restore`(형식이 운영 측 양식과 같은지는 미확인)입니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`identityProvider`·`originalApiUrl`은 바꾸지 않았습니다. `RULE_IDS`는 실제로 구현한 다섯 개(`device_registered`, `step_up_required`, `zone_notes_own_route`, `zone_announcement_edit`, `zone_unknown_route`) 그대로입니다. 복원 경로는 서버 함수의 소유자·해시 대조이고 판정기 규칙이 아닙니다.
 - 단계 목록: `build-public.mjs`·`deployment-identity.mjs`에 10을 더했고, `test/r5.test.mjs`의 '지원하지 않는 단계' 시험은 11로 옮겼습니다.
 - 다시 실행: `npm ci` 뒤 `node --test test/*.test.mjs`(2026-10-13 로컬 89건 중 89건 통과, 가짜 DB·가짜 로그인 검사기·임시 폴더 기준이며 심판 판정이 아님), `npm run decider:test`, `npm run detect:test`, `npm run policy:diff`, `npm run build -- --local`. 복구 뒤 1~9단계를 다시 확인하는 순서는 위 '복구 뒤 1~9단계 정상·금지 요청을 다시 실행하는 순서'를 따릅니다.
 - `src/attack-check.mjs`: 10단계 항목으로 토큰 없는 `POST /api/notes/:id/restore`가 `401`인지 실제로 보내는 점검(`anonymous_api_restore`)을 더했습니다. 로그인이 필요한 `restore_cross_owner`·`restore_normal_one_note`는 **미실행**으로 남습니다. 실제로 보낸 요청의 상태 코드만 기록하며 심판의 판정이 아닙니다.
-- 미실행으로 남은 것: 실제 Supabase의 `notes_backup` 표 생성과 사본 복원, 실제 `xdr/deny-rules.json`에 `policy:restore -- --apply` 적용, A·B 두 계정의 배포 화면 확인, 5단계 ①~④, 미등록 기기 공격과 재로그인 뒤 허용(6·7단계), 반 엔진의 사건 전달·접속 회수(9단계). 배포 주소가 이 커밋을 배포하기 전이면 이전 코드일 수 있습니다.
+- 미실행으로 남은 것: 실제 배포 화면에서의 사본 생성과 복원(예약 행 저장이 실제 DB에서 되는지 포함), 실제 `xdr/deny-rules.json`에 `policy:restore -- --apply` 적용, A·B 두 계정의 배포 화면 확인, 5단계 ①~④, 미등록 기기 공격과 재로그인 뒤 허용(6·7단계), 반 엔진의 사건 전달·접속 회수(9단계). 배포 주소가 이 커밋을 배포하기 전이면 이전 코드일 수 있습니다.
 - 제출 묶음: 변경을 모두 커밋한 뒤 `npm run bundle`로 만듭니다(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음).

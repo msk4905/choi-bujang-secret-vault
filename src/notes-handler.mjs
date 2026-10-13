@@ -11,7 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from './verify-login.mjs';
 import { noteResourceId } from './resources.mjs';
-import { readRestoreInput, restoreNote } from './notes-restore.mjs';
+import { readRestoreInput, restoreNote, saveBackup } from './notes-restore.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_TITLE = 200;
@@ -50,7 +50,7 @@ function logDenied(request, reason) {
   console.warn(`notes denied: ${reason} ${request.method}`);
 }
 
-export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {}) {
+export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, saveBackup: backup = saveBackup } = {}) {
   return async function handler(request, response) {
     response.setHeader('Cache-Control', 'no-store');
     const rawId = request.query?.id;
@@ -116,6 +116,8 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {
         });
         if (error?.code === '23505') return response.status(409).json({ error: 'ID_EXISTS' });
         if (error) throw error;
+        // 10단계: 만든 직후 검증용 사본을 한 번 남깁니다(실패해도 메모 만들기는 성공, 서버 로그에만 남음).
+        await backup({ db: deps.db, principal, noteId: id, title: input.title, content: input.body });
         return response.status(201).json({ id });
       }
       // 기존 행의 owner_id를 DB에서 읽어 확인된 사용자 ID와 비교한다. URL·본문의 값은 쓰지 않는다.

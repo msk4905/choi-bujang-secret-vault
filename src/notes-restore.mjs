@@ -1,10 +1,12 @@
-// 비공개 가상 메모 사본(notes_backup)에서 지정한 메모 한 건만 notes로 되살립니다. POST /api/notes/:id/restore
-// 사본은 서버 전용 키로만 읽습니다. 사용자·소유자는 서버가 확인한 로그인 결과만 쓰고 본문·헤더·쿼리의 값은 읽지 않습니다.
-// 요청은 두 단계입니다. ① 확인 코드 없이 보내면 복원할 버전과 바뀔 항목만 보여 주고 아무것도 쓰지 않습니다(응답의 confirm 코드).
-// ② {contentSha256, confirm}을 보내면 사본·현재 메모를 다시 읽어 코드가 같을 때만 씁니다.
-// 복원 전: 사본의 id·owner_id가 요청한 id·확인된 사용자와 같은지, 사본 내용의 해시가 사본에 적힌 해시와 요청이 말한 해시와 같은지 대조합니다.
-// 복원 후: 사본과 되살린 행을 새로 읽어 id·owner_id·내용 해시가 같은지 확인하고, 다르면 쓴 내용을 되돌립니다.
-// 다른 메모와 사본 표는 고치지 않습니다. 감사 기록은 따로 만들지 않고 서버 로그에 짧은 코드만 남깁니다(ID·본문·토큰 없음).
+// 메모를 만들 때 서버가 검증용 사본을 남기고, 메모 한 건만 그 사본으로 되살립니다. POST /api/notes/:id/restore
+// 사본은 notes 표 안의 예약 행입니다: 행 ID와 owner_id를 (메모 ID, 확인된 사용자 ID)에서 계산한 값으로 두어, 목록·조회·수정·삭제 경로가
+// 다루는 owner_id(진짜 사용자)와 절대 같지 않습니다. 그래서 API로는 보이지도 고쳐지지도 않고, 서버 전용 키로만 읽습니다.
+// 사본은 메모를 만든 직후 한 번만 남기며 이후 수정으로 덮어쓰지 않습니다(침해 전에 검증한 사본). 이미 있으면 그대로 둡니다.
+// 사용자·소유자는 서버가 확인한 로그인 결과만 쓰고 본문·헤더·쿼리의 값은 읽지 않습니다.
+// 복원 요청은 본문 없이 한 번 보내도 됩니다. 사본을 다시 읽어 검증하고(사본의 id·소유자·내용 해시), 하나라도 어긋나면 쓰지 않고 멈춥니다.
+// 실행 전 확인이 필요하면 본문에 {"dryRun": true}를 보냅니다: 복원할 버전과 바뀔 항목만 돌려주고 아무것도 쓰지 않습니다.
+// 쓴 뒤에는 사본과 되살린 행을 새로 읽어 다시 대조하고, 어긋나면 쓴 내용을 되돌립니다. 다른 메모는 고치지 않습니다.
+// 감사 기록은 따로 만들지 않고 서버 로그에 짧은 코드만 남깁니다(ID·본문·토큰 없음).
 import { createHash } from 'node:crypto';
 
 const HEX64 = /^[0-9a-f]{64}$/u;
@@ -12,6 +14,29 @@ const HEX64 = /^[0-9a-f]{64}$/u;
 // 내용 해시: sha256(제목 UTF-8 바이트 + 0x00 + 본문 UTF-8 바이트). 글자에 NUL이 들어갈 수 없어 제목과 본문 경계가 모호하지 않습니다.
 export function noteHash(title, content) {
   return createHash('sha256').update(title, 'utf8').update(Buffer.from([0])).update(content, 'utf8').digest('hex');
+}
+
+// 예약 ID: 버전 칸을 5로 두어, v4 UUID만 받는 로그인 검사(심판·Supabase 사용자)의 사용자 ID와 같아질 수 없습니다.
+function reservedUuid(label) {
+  const h = createHash('sha256').update(label, 'utf8').digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+export const backupRowId = (noteId) => reservedUuid(`aleph-backup-row:${noteId}`);
+export const backupOwnerId = (userId) => reservedUuid(`aleph-backup-owner:${userId}`);
+
+export function backupRow({ noteId, userId, title, content }) {
+  const record = { v: 1, id: noteId, owner: userId, title, content, sha256: noteHash(title, content) };
+  return { id: backupRowId(noteId), title: 'backup', content: JSON.stringify(record), owner_id: backupOwnerId(userId) };
+}
+
+// 메모를 만든 직후 호출합니다. 사본을 못 남겨도 메모 만들기는 실패시키지 않고 서버 로그에만 남깁니다(그 메모는 복원할 수 없음).
+export async function saveBackup({ db, principal, noteId, title, content }) {
+  try {
+    const { error } = await db.from('notes').insert(backupRow({ noteId, userId: principal.userId, title, content }));
+    if (error && error.code !== '23505') throw error; // 23505: 이미 사본이 있으면 그대로 둠
+  } catch {
+    console.error('notes backup not saved');
+  }
 }
 
 export function readRestoreInput(request) {
@@ -28,30 +53,44 @@ export function readRestoreInput(request) {
     if (!HEX64.test(hash)) return null;
     input.contentSha256 = hash;
   }
-  if (body.confirm !== undefined) {
-    if (typeof body.confirm !== 'string' || !/^[0-9a-f]{12}$/u.test(body.confirm)) return null;
-    if (input.contentSha256 === undefined) return null;
-    input.confirm = body.confirm;
+  if (body.dryRun !== undefined) {
+    if (typeof body.dryRun !== 'boolean') return null;
+    input.dryRun = body.dryRun;
   }
   return input;
 }
 
 const logDenied = (reason) => console.warn(`notes restore denied: ${reason}`);
 
+// 사본을 새로 읽고 검증합니다: 행 위치(ID·소유자), 기록 안의 메모 ID·소유자, 내용 해시가 모두 맞아야 합니다.
+async function readBackup(db, principal, noteId) {
+  const { data: row, error } = await db.from('notes').select('id, owner_id, title, content')
+    .eq('id', backupRowId(noteId)).eq('owner_id', backupOwnerId(principal.userId)).maybeSingle();
+  if (error) throw error;
+  if (!row) return { error: 'no_backup' };
+  let record;
+  try { record = JSON.parse(row.content); } catch { return { error: 'backup_corrupt' }; }
+  const valid = record && typeof record === 'object' && record.v === 1
+    && record.id === noteId && record.owner === principal.userId
+    && typeof record.title === 'string' && typeof record.content === 'string'
+    && typeof record.sha256 === 'string' && HEX64.test(record.sha256)
+    && noteHash(record.title, record.content) === record.sha256;
+  return valid ? { record } : { error: 'backup_corrupt' };
+}
+
 // 반환: { code, json }. 오류는 던지지 않고 호출한 쪽(handler)의 try/catch에 맡깁니다.
 export async function restoreNote({ db, principal, id, input }) {
-  const { data: backup, error: backupError } = await db.from('notes_backup')
-    .select('id, owner_id, title, content, content_sha256').eq('id', id).maybeSingle();
-  if (backupError) throw backupError;
-  if (!backup || backup.id !== id || backup.owner_id !== principal.userId) {
-    logDenied(!backup ? 'no_backup' : 'not_owner');
+  const found = await readBackup(db, principal, id);
+  if (found.error === 'no_backup') {
+    logDenied('no_backup');
     return { code: 404, json: { error: 'NOT_FOUND' } };
   }
-  const hash = noteHash(backup.title, backup.content);
-  if (hash !== backup.content_sha256) {
+  if (found.error) {
     logDenied('backup_corrupt');
     return { code: 409, json: { error: 'BACKUP_HASH_MISMATCH' } };
   }
+  const { record } = found;
+  const hash = record.sha256;
   if (input.contentSha256 !== undefined && hash !== input.contentSha256) {
     logDenied('request_hash_differs');
     return { code: 409, json: { error: 'HASH_MISMATCH' } };
@@ -68,41 +107,26 @@ export async function restoreNote({ db, principal, id, input }) {
   if (live && noteHash(live.title, live.content) === hash) {
     return { code: 200, json: { id, restored: 'unchanged', version, willChange: [], verified: true } };
   }
-
-  // 실행 전 단계: 복원할 버전과 바뀔 항목을 보여 주고 아무것도 쓰지 않습니다. 확인 코드는 방금 새로 읽은 사본·현재 메모·사용자에서 계산하므로,
-  // 확인 코드를 붙여 다시 보냈을 때 그 사이 사본이나 메모가 바뀌었으면 코드가 달라져 멈춥니다.
   const action = live ? 'update' : 'create';
-  const willChange = live
-    ? ['title', 'content'].filter((field) => live[field] !== backup[field])
-    : ['title', 'content'];
-  const code = createHash('sha256')
-    .update(JSON.stringify([id, principal.userId, hash, live ? noteHash(live.title, live.content) : null]))
-    .digest('hex').slice(0, 12);
-  if (input.confirm === undefined) {
+  const willChange = live ? ['title', 'content'].filter((field) => live[field] !== record[field]) : ['title', 'content'];
+  if (input.dryRun) {
     console.info('notes restore preview');
-    return { code: 200, json: { id, preview: true, version, action, willChange, confirm: code } };
-  }
-  if (input.confirm !== code) {
-    logDenied('confirm_mismatch');
-    return { code: 409, json: { error: 'CONFIRM_MISMATCH' } };
+    return { code: 200, json: { id, preview: true, version, action, willChange } };
   }
 
   // 쓰기 전 상태를 기억해 둡니다. 복원 뒤 검증에 실패하면 이 상태로 되돌립니다.
   const previous = live ? { title: live.title, content: live.content } : null;
-  let mode;
   if (live) {
-    const { data, error } = await db.from('notes').update({ title: backup.title, content: backup.content })
+    const { data, error } = await db.from('notes').update({ title: record.title, content: record.content })
       .eq('id', id).eq('owner_id', principal.userId).select('id, owner_id');
     if (error) throw error;
     if (!data?.length) { logDenied('owner_changed'); return { code: 404, json: { error: 'NOT_FOUND' } }; }
-    mode = 'updated';
   } else {
     const { error } = await db.from('notes').insert({
-      id, title: backup.title, content: backup.content, owner_id: principal.userId,
+      id, title: record.title, content: record.content, owner_id: principal.userId,
     });
     if (error?.code === '23505') return { code: 409, json: { error: 'ID_EXISTS' } };
     if (error) throw error;
-    mode = 'created';
   }
 
   if (!await verifiedAfterWrite(db, principal, id, hash)) {
@@ -110,21 +134,20 @@ export async function restoreNote({ db, principal, id, input }) {
     console.error('notes restore unverified');
     return { code: 502, json: { error: 'RESTORE_UNVERIFIED' } };
   }
-  console.info(`notes restored: ${mode}`);
-  return { code: mode === 'created' ? 201 : 200, json: { id, restored: mode, version, willChange, verified: true } };
+  const restored = live ? 'updated' : 'created';
+  console.info(`notes restored: ${restored}`);
+  return { code: live ? 200 : 201, json: { id, restored, version, willChange, verified: true } };
 }
 
 // 쓴 뒤에는 사본과 되살린 행을 둘 다 새로 읽어 ID·소유자·내용 해시를 확인합니다. 읽기 오류도 검증 실패로 봅니다.
 async function verifiedAfterWrite(db, principal, id, hash) {
   try {
-    const { data: fresh, error: freshError } = await db.from('notes_backup')
-      .select('id, owner_id, title, content, content_sha256').eq('id', id).maybeSingle();
-    const { data: after, error: afterError } = await db.from('notes')
+    const fresh = await readBackup(db, principal, id);
+    const { data: after, error } = await db.from('notes')
       .select('id, title, content, owner_id').eq('id', id).maybeSingle();
-    if (freshError || afterError || !fresh || !after) return false;
-    return fresh.id === id && fresh.owner_id === principal.userId
-      && fresh.content_sha256 === hash && noteHash(fresh.title, fresh.content) === hash
-      && after.id === fresh.id && after.owner_id === fresh.owner_id && noteHash(after.title, after.content) === hash;
+    if (fresh.error || error || !after) return false;
+    return fresh.record.sha256 === hash && after.id === id && after.owner_id === principal.userId
+      && noteHash(after.title, after.content) === hash;
   } catch { return false; }
 }
 

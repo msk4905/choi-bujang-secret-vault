@@ -120,10 +120,10 @@ async function apiChecks(app, config) {
       observed: '미실행: 이 점검은 반 엔진의 사건 전달이나 접속 회수를 시험하지 않음. npm run detect:test와 node --test test/detect-*.test.mjs는 가상 사건 연습일 뿐이며 심판의 판정이 아님' }] : []),
     ...(config.step >= 10 ? [
       { attackId: 'anonymous_api_restore', expected: '토큰 없는 POST /api/notes/:id/restore가 401로 거부됨', observed: describe('토큰 없는 POST /api/notes/:id/restore', results.restore) },
-      { attackId: 'restore_cross_owner', expected: 'B 로그인으로 A의 메모 복원을 요청하면 404로 거부되고, 사본 해시가 다르면 409로 거부되며 다른 메모는 바뀌지 않음',
-        observed: '미실행: 이 점검은 A·B 로그인 계정과 notes_backup 사본을 쓰지 않음. 학생이 두 계정으로 직접 확인해야 함. 코드 시험(node --test test/notes-restore.test.mjs)은 가짜 DB 기준이며 심판의 판정이 아님' },
+      { attackId: 'restore_cross_owner', expected: 'B 로그인으로 A의 메모 복원을 요청하면 404로 거부되고, 요청한 해시가 사본과 다르면 409로 거부되며 다른 메모는 바뀌지 않음',
+        observed: '미실행: 이 점검은 A·B 로그인 계정을 쓰지 않아 사본이 남은 메모를 만들 수 없음. 학생이 두 계정으로 직접 확인해야 함. 코드 시험(node --test test/notes-restore.test.mjs)은 가짜 DB 기준이며 심판의 판정이 아님' },
       { attackId: 'restore_normal_one_note', expected: 'B 로그인으로 사본에 있는 B의 메모 한 건을 복원하면 verified: true이고 다른 메모는 그대로임',
-        observed: '미실행: 이 점검은 로그인 계정과 사본 표를 쓰지 않음. 실제 DB 복원은 학생이 직접 확인해야 함' },
+        observed: '미실행: 이 점검은 로그인 계정을 쓰지 않아 메모를 만들고 변조한 뒤 복원하는 흐름을 보내지 않음. 실제 DB 복원은 학생이 직접 확인해야 함' },
     ] : []),
     { attackId: 'normal_login_crud', expected: 'A 계정 로그인 뒤 메모 추가·수정·삭제가 되고 로그아웃 뒤에는 자료가 사라짐',
       observed: '미실행: 이 점검은 로그인 계정을 쓰지 않음. 학생이 화면에서 직접 확인해야 함' },
