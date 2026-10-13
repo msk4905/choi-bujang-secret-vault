@@ -514,3 +514,15 @@ test('복구 경로는 선언한 api/restore/[id].js 하나뿐이다: 설정·�
     if (saved.key !== undefined) process.env.SUPABASE_SECRET_KEY = saved.key;
   }
 });
+
+test('변조로 현재 메모의 제목이나 내용이 비어 있거나 문자열이 아니어도 오류 없이 사본으로 되돌린다', async () => {
+  for (const tampered of [{ content: null }, { title: null }, { title: null, content: null }, { content: 12345 }]) {
+    const state = setup();
+    await bCreatesAndTampers(state, { tamper: 'none' });
+    Object.assign(live(state.rows), tampered); // 심판이 DB에서 직접 비정상 값으로 바꾼 경우
+    const [result] = await quiet(() => state.restore());
+    assert.equal(result.code, 200, JSON.stringify(tampered));
+    assert.equal(result.json.restored, 'updated');
+    assert.equal(noteHash(live(state.rows).title, live(state.rows).content), hash);
+  }
+});

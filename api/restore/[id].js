@@ -135,7 +135,8 @@ export async function restoreNote({ db, principal, id, input }) {
     return { code: 404, json: { error: 'NOT_FOUND' } };
   }
   const version = `sha256:${hash.slice(0, 12)}`;
-  if (live && noteHash(live.title, live.content) === hash) {
+  // 현재 메모가 사본과 같은지는 값을 직접 비교합니다(변조로 제목·내용이 비어 있거나 문자열이 아니어도 오류 없이 "다름"으로 보고 되살립니다).
+  if (live && live.title === record.title && live.content === record.content) {
     await audit('restore_note', { contentHash: hash, wrote: false });
     return { code: 200, json: { id, ownerId: principal.userId, contentSha256: hash, ...proof(record, false), restored: 'unchanged', version, willChange: [], verified: true } };
   }
