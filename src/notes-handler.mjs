@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from './verify-login.mjs';
+import { noteResourceId } from './resources.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_TITLE = 200;
@@ -72,6 +73,8 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID } = {
     if (hasId && (typeof rawId !== 'string' || !UUID.test(rawId))) {
       return response.status(400).json({ error: 'INVALID_ID' });
     }
+    // 8단계: 이 요청이 가리키는 자원 ID를 서버가 경로에서만 계산합니다(응답에는 싣지 않음).
+    request.resourceId = noteResourceId(hasId ? rawId : undefined);
     const input = request.method === 'POST' || request.method === 'PUT' ? readInput(request) : null;
     if ((request.method === 'POST' || request.method === 'PUT') && !input) {
       return response.status(400).json({ error: 'INVALID_NOTE' });
