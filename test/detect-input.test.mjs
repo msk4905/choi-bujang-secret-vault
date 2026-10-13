@@ -4,11 +4,11 @@ import { readEvents, detect } from '../src/detect.mjs';
 
 const good = { at: '2026-10-01T00:00:00.000Z', method: 'GET', identity: { sub: 'learner_fixture' } };
 
-test('정상 사건은 at·method·subject 세 값만 남긴다', () => {
+test('정상 사건은 at·method·subject 세 값과 선택 network만 남긴다', () => {
   const { events, skipped } = readEvents([{ ...good, body: 'memo text', token: 'x', name: 'real name', identity: { ...good.identity, email: 'a@b.c' } }]);
   assert.equal(skipped, 0);
-  assert.deepEqual(events, [{ at: Date.parse(good.at), method: 'GET', subject: 'learner_fixture' }]);
-  assert.deepEqual(Object.keys(events[0]), ['at', 'method', 'subject']);
+  assert.deepEqual(events, [{ at: Date.parse(good.at), method: 'GET', subject: 'learner_fixture', network: null }]);
+  assert.deepEqual(Object.keys(events[0]), ['at', 'method', 'subject', 'network']);
 });
 
 test('형식이 틀린 사건은 값 없이 개수로만 센다', () => {
