@@ -3,7 +3,7 @@
 const STARTER_MARKER = 'SAMPLE_NOTE_1';
 
 export async function runAttackChecks(config) {
-  if (![2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -100,6 +100,7 @@ async function apiChecks(app, config) {
     remove: await send(app, 'DELETE', `/api/notes/${NIL_ID}`),
     forged: await send(app, 'GET', '/api/notes', { token: forged }),
     ...(config.step >= 10 ? { restore: await send(app, 'POST', '/api/notes/restore', { body: {} }) } : {}),
+    ...(config.step >= 12 ? { warRoom: await send(app, 'GET', '/api/war-room') } : {}),
   };
   return [
     { attackId: 'anonymous_api_list', expected: '토큰 없는 GET /api/notes가 401로 거부됨', observed: describe('토큰 없는 GET /api/notes', results.list) },
@@ -126,6 +127,11 @@ async function apiChecks(app, config) {
       observed: '미실행: 이 점검은 반 엔진의 사건 전달이나 접속 회수를 시험하지 않음. npm run detect:test와 node --test test/detect-*.test.mjs는 가상 사건 연습일 뿐이며 심판의 판정이 아님' }] : []),
     ...(config.step >= 11 ? [{ attackId: 'device_approval_gate', expected: '기기 승인 확인 전에는 화면에 자료가 없고, 서버가 허용한 기기에서만 기존 자료실이 열리며 설치 표시나 버튼만으로는 열리지 않음',
       observed: '미실행: 이 점검은 화면을 열거나 로그인하지 않음. 가짜 서버 응답으로 한 Chromium 시험(승인 전 요청 0건, 200이면 열림, 403이면 닫힘)만 있고 실제 배포 주소·실제 계정·심판의 판정이 아님' }] : []),
+    ...(config.step >= 12 ? [
+      { attackId: 'anonymous_war_room', expected: '토큰 없는 GET /api/war-room이 401로 거부됨', observed: describe('토큰 없는 GET /api/war-room', results.warRoom) },
+      { attackId: 'war_room_screen_matches_server', expected: '작전실 화면의 복구 건수·판정기 규칙 수가 서버 응답과 같고, 미실행 항목은 미실행으로 표시되며 메모 본문은 보이지 않음',
+        observed: '미실행: 이 점검은 로그인하지 않아 화면을 열지 않음. 가짜 DB 시험(node --test test/war-room.test.mjs)만 했고 실제 배포 주소·실제 계정·심판의 판정이 아님' },
+    ] : []),
     { attackId: 'normal_login_crud', expected: 'A 계정 로그인 뒤 메모 추가·수정·삭제가 되고 로그아웃 뒤에는 자료가 사라짐',
       observed: '미실행: 이 점검은 로그인 계정을 쓰지 않음. 학생이 화면에서 직접 확인해야 함' },
   ];

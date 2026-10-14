@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101a28">
+  <title>BYTE BACK | 탈환 작전실</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; background: #101a28; color: #ecf4ff; }
+    main { max-width: 760px; margin: 0 auto; padding: 36px 20px 64px; }
+    .eyebrow { color: #8ad8df; font-size: 14px; font-weight: 700; letter-spacing: .08em; }
+    h1 { margin: 14px 0; font-size: clamp(28px, 7vw, 42px); line-height: 1.2; }
+    p, li, td, th { font-size: 16px; line-height: 1.6; color: #bfd0e5; }
+    a { color: #8ad8df; }
+    .notice, .card, .auth { margin: 0 0 16px; padding: 16px 18px; border: 1px solid #51667c; border-radius: 14px; background: #1a2a3d; }
+    .notice { border-color: #d0a373; background: #61452a44; color: #ffe9d3; }
+    .card h2 { margin: 0 0 8px; font-size: 18px; color: #ecf4ff; }
+    .badge { display: inline-block; margin-left: 8px; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; vertical-align: middle; }
+    .confirmed { background: #8ad8df; color: #101a28; }
+    .not_run { background: #51667c; color: #ecf4ff; }
+    .unavailable { background: #ffb3c0; color: #101a28; }
+    .waiting { background: #2b3d52; color: #bfd0e5; }
+    code { color: #ecf4ff; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #2b3d52; }
+    form { display: grid; gap: 10px; }
+    label { display: grid; gap: 4px; font-size: 15px; color: #bfd0e5; }
+    input { padding: 10px 12px; border-radius: 8px; border: 1px solid #51667c; background: #101a28; color: #ecf4ff; font-size: 16px; }
+    button { padding: 10px 14px; border-radius: 8px; border: 0; background: #8ad8df; color: #101a28; font-size: 16px; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #51667c; color: #ecf4ff; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    [hidden] { display: none !important; }
+    #auth-error { margin: 8px 0 0; color: #ffb3c0; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">BYTE BACK · 12단계 탈환 작전실</div>
+    <h1>탈환 작전실</h1>
+    <p><a href="/">← 자료실로</a></p>
+    <div class="notice">이 화면은 통과·성공을 판정하지 않습니다. 서버가 이 요청에 실제로 돌려준 값만 「확인됨」으로 적고, 읽을 출처가 없는 항목은 「미실행」, 읽다 실패한 항목은 「읽지 못함」으로 적습니다. 심판의 판정이 아니며, 메모 제목·본문은 표시하지 않습니다.</div>
+
+    <section class="auth" aria-label="로그인">
+      <p id="auth-state">로그인 상태를 확인하는 중입니다.</p>
+      <form id="login-form" hidden>
+        <label>이메일<input id="email" type="email" autocomplete="email" required></label>
+        <label>비밀번호<input id="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit" id="login-button">로그인</button>
+      </form>
+      <div class="row">
+        <button type="button" id="refresh-button" hidden>작전실 읽기</button>
+        <button type="button" id="logout-button" class="secondary" hidden>로그아웃</button>
+      </div>
+      <p id="auth-error" role="alert"></p>
+      <p id="http-state">서버 응답: 아직 요청하지 않음</p>
+    </section>
+
+    <section class="card" id="card-decider"><h2>판정기 규칙 <span class="badge waiting">아직 요청하지 않음</span></h2><div class="body"></div></section>
+    <section class="card" id="card-detect"><h2>탐지 사건 <span class="badge waiting">아직 요청하지 않음</span></h2><div class="body"></div></section>
+    <section class="card" id="card-revocation"><h2>회수 상태 <span class="badge waiting">아직 요청하지 않음</span></h2><div class="body"></div></section>
+    <section class="card" id="card-restore"><h2>복구 버전 <span class="badge waiting">아직 요청하지 않음</span></h2><div class="body"></div></section>
+  </main>
+  <script type="module">
+    const $ = selector => document.querySelector(selector);
+    const stateText = $('#auth-state');
+    const form = $('#login-form');
+    const loginButton = $('#login-button');
+    const refreshButton = $('#refresh-button');
+    const logoutButton = $('#logout-button');
+    const errorText = $('#auth-error');
+    const httpText = $('#http-state');
+    let session = null;
+    let supabase = null;
+
+    // 모든 글은 textContent로만 넣습니다. 서버가 준 값이 HTML로 해석되지 않습니다.
+    const LABEL = { confirmed: '서버 응답에서 확인됨', not_run: '미실행', unavailable: '읽지 못함', waiting: '아직 요청하지 않음' };
+    function show(id, status, lines, table) {
+      const card = $(`#card-${id}`);
+      const badge = card.querySelector('.badge');
+      badge.className = `badge ${LABEL[status] ? status : 'unavailable'}`;
+      badge.textContent = LABEL[status] ?? '형식 오류';
+      const body = card.querySelector('.body');
+      body.replaceChildren(...lines.map(text => Object.assign(document.createElement('p'), { textContent: text })));
+      if (table) body.append(table);
+    }
+    function makeTable(head, rows) {
+      const t = document.createElement('table');
+      const add = (cells, tag) => {
+        const tr = document.createElement('tr');
+        for (const c of cells) tr.append(Object.assign(document.createElement(tag), { textContent: c }));
+        t.append(tr);
+      };
+      add(head, 'th');
+      rows.forEach(r => add(r, 'td'));
+      return t;
+    }
+    function resetAll(status, text) {
+      for (const id of ['decider', 'detect', 'revocation', 'restore']) show(id, status, [text]);
+    }
+    resetAll('waiting', '로그인한 뒤 「작전실 읽기」를 누르면 서버의 응답을 보여 줍니다.');
+
+    const isStatus = v => ['confirmed', 'not_run', 'unavailable'].includes(v);
+    function render(data) {
+      if (!data || data.schema !== 'aleph.war-room.v1' || !data.decider || !data.detect || !data.revocation || !data.restore
+          || ![data.decider, data.detect, data.revocation, data.restore].every(item => isStatus(item.status))) {
+        resetAll('format', '서버 응답 형식이 맞지 않아 표시하지 않습니다.');
+        return;
+      }
+      const d = data.decider;
+      if (d.status === 'confirmed' && Array.isArray(d.ruleIds)) {
+        const shown = d.ruleIds.length;
+        show('decider', 'confirmed', [
+          `규칙 ${shown}개 (서버 보고 ${d.ruleCount}개 ${shown === d.ruleCount ? '= 같음' : '≠ 다름'}) · 정책 사본 ${d.policyVersion} (${d.snapshotSha256}…)`,
+          `현재 코드의 정책과 사본이 ${d.matchesSnapshot === true ? '같음' : '다름 — npm run policy:diff로 확인'}`,
+          '서버 코드가 가진 값입니다. 반 엔진이 지금 실제로 적용 중인 정책이라는 뜻은 아닙니다.',
+        ], makeTable(['규칙 이름'], d.ruleIds.map(id => [String(id)])));
+      } else show('decider', d.status, ['판정기 규칙을 읽지 못했습니다.']);
+      show('detect', data.detect.status, data.detect.status === 'not_run'
+        ? ['미실행: 이 저장소에는 반 엔진이 보낸 사건을 모아 두는 곳이 없어 보여 줄 사건이 없습니다. detect:test는 가상 사건 연습일 뿐입니다.']
+        : ['탐지 사건을 읽지 못했습니다.']);
+      show('revocation', data.revocation.status, data.revocation.status === 'not_run'
+        ? ['미실행: 접속 회수 상태는 운영 반 엔진이 가지며 이 저장소에서 읽는 길이 없습니다. 회수가 연결됐다고 표시하지 않습니다.']
+        : ['회수 상태를 읽지 못했습니다.']);
+      const r = data.restore;
+      if (r.status === 'confirmed' && Array.isArray(r.records)) {
+        const rows = r.records.map(x => [x.at ?? '시각 없음', x.noteIdEnd ?? '…', x.sha256Head ?? '해시 없음']);
+        const same = rows.length === r.restoreCount;
+        show('restore', 'confirmed', [
+          `내 사본 ${r.backupCopies}건 · 복원 기록 ${r.restoreCount}건${r.truncated ? ' (최근 50건까지만)' : ''}`,
+          `아래 표 ${rows.length}줄 / 서버 보고 ${r.restoreCount}건 → ${same ? '일치' : '불일치 — 이 수치를 믿지 마세요'}`,
+          '메모 ID는 끝 4자리, 해시는 앞 8자리만 보입니다.',
+        ], makeTable(['복원 시각', '메모 ID 끝', '해시 앞'], rows));
+      } else show('restore', r.status, [r.status === 'unavailable'
+        ? '복구 기록을 읽지 못했습니다. 12단계 SQL(supabase/12-war-room.sql)을 실행하지 않았거나 표에 닿지 못했을 수 있습니다.' : '복구 기록을 읽지 못했습니다.']);
+    }
+
+    async function refresh() {
+      if (!session?.access_token) return;
+      refreshButton.disabled = true;
+      httpText.textContent = '서버 응답: 기다리는 중';
+      resetAll('waiting', '서버의 답이 오기 전에는 값을 표시하지 않습니다.');
+      try {
+        const response = await fetch('/api/war-room', { cache: 'no-store', headers: { Authorization: `Bearer ${session.access_token}` } });
+        httpText.textContent = `서버 응답: HTTP ${response.status}`;
+        if (!response.ok) { resetAll('unavailable', `서버가 읽기를 허용하지 않았습니다 (HTTP ${response.status}).`); return; }
+        render(await response.json());
+      } catch {
+        httpText.textContent = '서버 응답: 없음 (연결 오류 또는 형식 오류)';
+        resetAll('unavailable', '요청이 서버에 닿지 않았거나 응답을 읽지 못했습니다.');
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    function showSession(next) {
+      session = next ?? null;
+      const user = session?.user;
+      form.hidden = Boolean(user);
+      refreshButton.hidden = !user;
+      logoutButton.hidden = !user;
+      stateText.textContent = user ? `로그인됨: ${user.email ?? '이메일 없음'}` : '로그인하지 않은 상태입니다.';
+      if (!user) { httpText.textContent = '서버 응답: 아직 요청하지 않음'; resetAll('waiting', '로그인한 뒤 「작전실 읽기」를 누르면 서버의 응답을 보여 줍니다.'); }
+    }
+
+    try {
+      const configResponse = await fetch('/api/config', { headers: { Accept: 'application/json' } });
+      if (!configResponse.ok) throw new Error('config');
+      const { supabaseUrl, publishableKey } = await configResponse.json();
+      const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm');
+      // 로그인 토큰은 브라우저 저장소에 남기지 않고 이 화면의 메모리에만 둡니다.
+      supabase = createClient(supabaseUrl, publishableKey, { auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false } });
+    } catch {
+      stateText.textContent = '로그인 모듈을 불러오지 못했습니다.';
+      errorText.textContent = '/api/config나 로그인 SDK를 읽지 못했습니다. 연결을 확인하고 새로고침하세요.';
+    }
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!supabase) return;
+      errorText.textContent = '';
+      loginButton.disabled = true;
+      try {
+        const { error } = await supabase.auth.signInWithPassword({ email: $('#email').value.trim(), password: $('#password').value });
+        if (error) errorText.textContent = `로그인 실패: ${error.message}`;
+      } catch {
+        errorText.textContent = '로그인 실패: 네트워크 오류로 요청을 보내지 못했습니다.';
+      } finally {
+        $('#password').value = '';
+        loginButton.disabled = false;
+      }
+    });
+    logoutButton.addEventListener('click', async () => { if (supabase) await supabase.auth.signOut().catch(() => {}); });
+    refreshButton.addEventListener('click', refresh);
+    if (supabase) {
+      supabase.auth.onAuthStateChange((_event, next) => showSession(next));
+      try { showSession((await supabase.auth.getSession()).data.session); } catch { showSession(null); }
+    }
+  </script>
+</body>
+</html>
