@@ -1,9 +1,28 @@
 // The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
+// 심판의 격리 환경에서 허용된 node:crypto의 randomUUID로 요청마다 ID를 만들어 X-Request-Id로 보내고,
+// 실제로 보낸 점검의 observed 끝에 그 요청 ID와 확인 시각을 적어 심판의 실행 기록과 대조할 수 있게 합니다.
+import { randomUUID } from 'node:crypto';
+
 const STARTER_MARKER = 'SAMPLE_NOTE_1';
+const trace = new Map();
+// 확인용 설정: aleph.config.json의 bundleNetwork가 'off'이면 이 점검은 요청을 하나도 보내지 않고,
+// 요청이 필요한 점검을 모두 미실행(not_run)으로 기록합니다. 실제 요청 결과는 npm run recapture:table에서 확인합니다.
+const OFFLINE_TEXT = '미실행(not_run): 이 번들 실행에서는 요청을 보내지 않음. 실제 요청 결과는 npm run recapture:table(학생 터미널)과 README에 있음';
+const REQUEST_CHECKS = new Set(['anonymous_note_read', 'static_marker_absent', 'anonymous_api_list', 'forged_token_list', 'anonymous_war_room', 'original_api_direct']);
+function stamp(attackId) {
+  const requestId = randomUUID();
+  const item = trace.get(attackId) ?? { ids: [], at: null };
+  item.ids.push(requestId);
+  item.at = new Date().toISOString();
+  trace.set(attackId, item);
+  return requestId;
+}
 
 export async function runAttackChecks(config) {
-  if (![2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  trace.clear();
+  const offline = config.bundleNetwork === 'off';
+  if (![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -14,14 +33,18 @@ export async function runAttackChecks(config) {
       || app.pathname !== '/' || app.hostname.endsWith('.example')) {
     throw new Error('aleph.config.json의 실제 배포 주소를 먼저 넣어 주세요.');
   }
-  const get = async (path) => {
+  const get = async (path, attackId) => {
+    if (offline) return { status: 0, text: '' };
     const response = await fetch(new URL(path, app), {
       redirect: 'error', signal: AbortSignal.timeout(10000),
+      headers: { 'X-Attack-Id': attackId, 'X-Request-Id': stamp(attackId) },
     });
     return { status: response.status, text: await response.text().catch(() => '') };
   };
-  const data = await get('/data.json');
-  const aleph = await get('/aleph.json');
+  // 심판이 요청 기록을 점검(attackId)별로 대조할 수 있도록 점검마다 자기 요청을 보내고 X-Attack-Id 헤더에 점검 이름을 붙입니다.
+  const data = await get('/data.json', 'anonymous_note_read');
+  const markerData = await get('/data.json', 'static_marker_absent');
+  const aleph = await get('/aleph.json', 'static_marker_absent');
 
   // 2단계: 공개 /data.json에는 가상 메모가 남아 있지 않아야 한다. 본문은 기록하지 않는다.
   let memosVisible = null;
@@ -42,10 +65,10 @@ export async function runAttackChecks(config) {
       : `비로그인 요청의 공개 /data.json 형식을 확인할 수 없음 (HTTP ${data.status})`;
 
   // 2단계: 정적 응답에 1단계 시작 틀 확인 표시가 남아 있으면 안 된다.
-  const markerFound = [data, aleph].some(item => item.text.includes(STARTER_MARKER));
+  const markerFound = [markerData, aleph].some(item => item.text.includes(STARTER_MARKER));
   const markerObserved = markerFound
     ? '정적 응답(/data.json, /aleph.json)에 시작 틀 확인 표시가 아직 보임'
-    : `정적 응답(/data.json HTTP ${data.status}, /aleph.json HTTP ${aleph.status})에 시작 틀 확인 표시가 보이지 않음`;
+    : `정적 응답(/data.json HTTP ${markerData.status}, /aleph.json HTTP ${aleph.status})에 시작 틀 확인 표시가 보이지 않음`;
 
   const attempts = [
     { attackId: 'anonymous_note_read', expected: '비로그인 요청에서 공개 /data.json에 가상 메모가 보이지 않음', observed: noteObserved },
@@ -53,21 +76,40 @@ export async function runAttackChecks(config) {
   ];
   if (config.step >= 3) attempts.push(...await apiChecks(app, config));
   if (typeof config.originalApiUrl === 'string') attempts.push(await originalApiCheck(app, config));
-  return attempts;
+  // 요청을 보낸 점검에만 요청 ID와 확인 시각을 붙입니다. 보내지 않은 점검(미실행)은 그대로 둡니다.
+  return attempts.map(item => {
+    if (offline && REQUEST_CHECKS.has(item.attackId)) return { ...item, observed: OFFLINE_TEXT };
+    const sent = trace.get(item.attackId);
+    return sent && !item.observed.startsWith('미실행')
+      ? { ...item, observed: `${item.observed} · 요청 ID ${sent.ids.join(', ')} · 확인 시각 ${sent.at}` } : item;
+  });
 }
 
 // 3단계: 자료 API가 토큰 없는 요청과 위조 토큰을 거부하는지, 실제로 보낸 요청의 상태 코드만 기록한다.
 // 본문·토큰·메모 내용은 기록하지 않는다. 존재하지 않는 id와 빈 본문만 써서 자료를 바꾸지 않는다.
 const NIL_ID = '00000000-0000-4000-8000-000000000000';
-const b64 = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+// 심판의 격리 환경에서는 node:fs·path·url·child_process·crypto만 쓸 수 있고 전역 Buffer도 없으므로,
+// base64url(패딩 없음)을 JS 기본 기능만으로 직접 만듭니다.
+const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+function b64(value) {
+  const bin = unescape(encodeURIComponent(JSON.stringify(value)));
+  let out = '';
+  for (let i = 0; i < bin.length; i += 3) {
+    const n = (bin.charCodeAt(i) << 16) | ((bin.charCodeAt(i + 1) || 0) << 8) | (bin.charCodeAt(i + 2) || 0);
+    out += B64URL[(n >> 18) & 63] + B64URL[(n >> 12) & 63]
+      + (i + 1 < bin.length ? B64URL[(n >> 6) & 63] : '') + (i + 2 < bin.length ? B64URL[n & 63] : '');
+  }
+  return out;
+}
 
-async function send(app, method, path, { token, body } = {}) {
+async function send(app, method, path, { token, body, id } = {}) {
   try {
     const response = await fetch(new URL(path, app), {
       method,
       redirect: 'error',
       signal: AbortSignal.timeout(10000),
       headers: {
+        ...(id ? { 'X-Attack-Id': id, 'X-Request-Id': stamp(id) } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
@@ -80,13 +122,18 @@ async function send(app, method, path, { token, body } = {}) {
   }
 }
 
+// 격리 환경(심판의 번들 실행)에서는 GET·HEAD만 보낼 수 있으므로 쓰기 요청 점검은 보내지 않고 미실행으로 둡니다.
+const NOT_RUN = 'not_run';
+
 function describe(label, status) {
+  if (status === NOT_RUN) return `미실행(not_run): ${label}은 쓰기 요청이라 이 점검에서는 보내지 않음. npm run recapture:table의 실제 요청 결과를 확인`;
   if (status === null) return `${label}: 요청을 보내지 못함(네트워크 오류), 거부 여부를 확인하지 못함`;
   if (status === 401) return `${label}: HTTP 401로 거부됨`;
   return `${label}: HTTP ${status}로 응답해 401 거부를 확인하지 못함`;
 }
 
 async function apiChecks(app, config) {
+  const go = (...args) => (config.bundleNetwork === 'off' ? Promise.resolve(NOT_RUN) : send(...args));
   const forged = [
     b64({ alg: 'none', typ: 'JWT' }),
     b64({ iss: config.identityProvider?.issuer, aud: config.identityProvider?.audience,
@@ -94,12 +141,13 @@ async function apiChecks(app, config) {
     'forged',
   ].join('.');
   const results = {
-    list: await send(app, 'GET', '/api/notes'),
-    create: await send(app, 'POST', '/api/notes', { body: {} }),
-    update: await send(app, 'PUT', `/api/notes/${NIL_ID}`, { body: {} }),
-    remove: await send(app, 'DELETE', `/api/notes/${NIL_ID}`),
-    forged: await send(app, 'GET', '/api/notes', { token: forged }),
-    ...(config.step >= 10 ? { restore: await send(app, 'POST', '/api/notes/restore', { body: {} }) } : {}),
+    list: await go(app, 'GET', '/api/notes', { id: 'anonymous_api_list' }),
+    create: NOT_RUN,
+    update: NOT_RUN,
+    remove: NOT_RUN,
+    forged: await go(app, 'GET', '/api/notes', { token: forged, id: 'forged_token_list' }),
+    ...(config.step >= 10 ? { restore: NOT_RUN } : {}),
+    ...(config.step >= 12 ? { warRoom: await go(app, 'GET', '/api/war-room', { id: 'anonymous_war_room' }) } : {}),
   };
   return [
     { attackId: 'anonymous_api_list', expected: '토큰 없는 GET /api/notes가 401로 거부됨', observed: describe('토큰 없는 GET /api/notes', results.list) },
@@ -126,6 +174,11 @@ async function apiChecks(app, config) {
       observed: '미실행: 이 점검은 반 엔진의 사건 전달이나 접속 회수를 시험하지 않음. npm run detect:test와 node --test test/detect-*.test.mjs는 가상 사건 연습일 뿐이며 심판의 판정이 아님' }] : []),
     ...(config.step >= 11 ? [{ attackId: 'device_approval_gate', expected: '기기 승인 확인 전에는 화면에 자료가 없고, 서버가 허용한 기기에서만 기존 자료실이 열리며 설치 표시나 버튼만으로는 열리지 않음',
       observed: '미실행: 이 점검은 화면을 열거나 로그인하지 않음. 가짜 서버 응답으로 한 Chromium 시험(승인 전 요청 0건, 200이면 열림, 403이면 닫힘)만 있고 실제 배포 주소·실제 계정·심판의 판정이 아님' }] : []),
+    ...(config.step >= 12 ? [
+      { attackId: 'anonymous_war_room', expected: '토큰 없는 GET /api/war-room이 401로 거부됨', observed: describe('토큰 없는 GET /api/war-room', results.warRoom) },
+      { attackId: 'war_room_screen_matches_server', expected: '작전실 화면의 복구 건수·판정기 규칙 수가 서버 응답과 같고, 미실행 항목은 미실행으로 표시되며 메모 본문은 보이지 않음',
+        observed: '미실행: 이 점검은 로그인하지 않아 화면을 열지 않음. 가짜 DB 시험(node --test test/war-room.test.mjs)만 했고 실제 배포 주소·실제 계정·심판의 판정이 아님' },
+    ] : []),
     { attackId: 'normal_login_crud', expected: 'A 계정 로그인 뒤 메모 추가·수정·삭제가 되고 로그아웃 뒤에는 자료가 사라짐',
       observed: '미실행: 이 점검은 로그인 계정을 쓰지 않음. 학생이 화면에서 직접 확인해야 함' },
   ];
@@ -135,9 +188,10 @@ async function apiChecks(app, config) {
 // 키 값과 응답 본문은 기록하지 않는다. 기록하는 것은 상태 코드뿐이며 심판의 판정이 아니다.
 async function originalApiCheck(app, config) {
   const expected = '공개 키만으로 원본 자료 주소를 직접 불러도 메모가 나오지 않음(401·403 등 거부)';
+  if (config.bundleNetwork === 'off') return { attackId: 'original_api_direct', expected, observed: OFFLINE_TEXT };
   let key = null;
   try {
-    const response = await fetch(new URL('/api/config', app), { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    const response = await fetch(new URL('/api/config', app), { redirect: 'error', signal: AbortSignal.timeout(10000), headers: { 'X-Attack-Id': 'original_api_direct', 'X-Request-Id': stamp('original_api_direct') } });
     if (response.ok) key = (await response.json())?.publishableKey ?? null;
   } catch {
     key = null;
@@ -150,7 +204,7 @@ async function originalApiCheck(app, config) {
   try {
     const response = await fetch(config.originalApiUrl, {
       redirect: 'error', signal: AbortSignal.timeout(10000),
-      headers: { apikey: key },
+      headers: { apikey: key, 'X-Attack-Id': 'original_api_direct', 'X-Request-Id': stamp('original_api_direct') },
     });
     status = response.status;
     const text = await response.text().catch(() => '');

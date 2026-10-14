@@ -51,7 +51,8 @@ test('build identity uses Vercel Git and deployment metadata', () => {
   }
   assert.equal('originalApiUrl' in deploymentIdentity(env, { ...config, step: 4, originalApiUrl: original }), false);
   assert.equal(deploymentIdentity(env, { ...config, step: 11 }).step, 11);
-  assert.throws(() => deploymentIdentity(env, { ...config, step: 12 }));
+  assert.equal(deploymentIdentity(env, { ...config, step: 12 }).step, 12);
+  assert.throws(() => deploymentIdentity(env, { ...config, step: 13 }));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_PROVIDER: undefined }, config));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_COMMIT_SHA: 'short' }, config));
 });
@@ -76,8 +77,9 @@ test('attack check reads static files without credentials and finds no memos or 
   await withFetch(clean, async (seen) => {
     const [notes, marker] = await runAttackChecks(config);
     assert.deepEqual(seen.map(item => item.url), [
-      'https://student-defense.vercel.app/data.json',
-      'https://student-defense.vercel.app/aleph.json',
+      'https://student-defense.vercel.app/data.json', // anonymous_note_read
+      'https://student-defense.vercel.app/data.json', // static_marker_absent
+      'https://student-defense.vercel.app/aleph.json', // static_marker_absent
     ]);
     assert.ok(seen.every(item => item.redirect === 'error'));
     assert.match(notes.observed, /가상 메모가 보이지 않음/u);
@@ -127,11 +129,16 @@ test('3단계 점검은 토큰 없는 요청과 위조 토큰의 거부 여부�
       const api = attempts.filter(item => /^(anonymous_api|forged)/u.test(item.attackId));
       assert.equal(api.length, 5);
       const rejected = respond().status === 401;
-      assert.ok(api.every(item => item.observed.includes(rejected ? '401로 거부됨' : 'HTTP 200로 응답해')));
+      // 격리 환경(심판의 번들 실행)은 GET·HEAD만 허용하므로 쓰기 요청 점검 셋은 보내지 않고 미실행으로 남긴다.
+      const reads = api.filter(item => /^(anonymous_api_list|forged_token_list)$/u.test(item.attackId));
+      const writes = api.filter(item => /^anonymous_api_(create|update|delete)$/u.test(item.attackId));
+      assert.deepEqual([reads.length, writes.length], [2, 3]);
+      assert.ok(reads.every(item => item.observed.includes(rejected ? '401로 거부됨' : 'HTTP 200로 응답해')));
+      assert.ok(writes.every(item => /^미실행\(not_run\)/u.test(item.observed)));
       assert.equal(attempts.at(-1).attackId, 'normal_login_crud');
       assert.match(attempts.at(-1).observed, /^미실행/u);
       assert.deepEqual(sent.filter(item => item.pathname.startsWith('/api')).map(item => item.method),
-        ['GET', 'POST', 'PUT', 'DELETE', 'GET']);
+        ['GET', 'GET']);
       assert.ok(sent.filter(item => item.auth).length === 1);
       assert.equal(JSON.stringify(attempts).includes('비밀'), false);
       assert.equal(JSON.stringify(attempts).includes('eyJ'), false);

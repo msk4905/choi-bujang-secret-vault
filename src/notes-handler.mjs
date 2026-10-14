@@ -13,6 +13,7 @@ import config from '../aleph.config.json' with { type: 'json' };
 import { createLoginVerifier } from './verify-login.mjs';
 import { noteResourceId } from './resources.mjs';
 import { restoreOneNote } from './note-restore.mjs';
+import { buildWarRoom } from './war-room.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_TITLE = 200;
@@ -74,7 +75,9 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, newA
     const hasId = rawId !== undefined;
     // 10단계: POST /api/notes/restore (vercel.json이 ?restore=1로 넘김). 주소에 id가 있으면 복원 경로가 아닙니다.
     const isRestore = !hasId && request.query?.restore === '1';
-    const allowed = isRestore ? ['POST'] : hasId ? ['GET', 'PUT', 'DELETE'] : ['GET', 'POST'];
+    // 12단계: GET /api/war-room (vercel.json이 ?warRoom=1로 넘김). 로그인한 본인의 가린 요약만 돌려줍니다.
+    const isWarRoom = !hasId && !isRestore && request.query?.warRoom === '1';
+    const allowed = isWarRoom ? ['GET'] : isRestore ? ['POST'] : hasId ? ['GET', 'PUT', 'DELETE'] : ['GET', 'POST'];
     if (!allowed.includes(request.method)) {
       response.setHeader('Allow', allowed.join(', '));
       return response.status(405).json({ error: 'METHOD_NOT_ALLOWED' });
@@ -96,6 +99,14 @@ export function createNotesHandler({ getDeps = envDeps, newId = randomUUID, newA
       return response.status(401).json({ error: 'UNAUTHENTICATED' });
     }
 
+    if (isWarRoom) {
+      try {
+        return response.status(200).json(await buildWarRoom({ db: deps.db, userId: principal.userId }));
+      } catch {
+        console.error('war room failed');
+        return response.status(502).json({ error: 'WAR_ROOM_UNAVAILABLE' });
+      }
+    }
     if (hasId && (typeof rawId !== 'string' || !UUID.test(rawId))) {
       return response.status(400).json({ error: 'INVALID_ID' });
     }

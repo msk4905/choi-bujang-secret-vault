@@ -1,8 +1,10 @@
 # BYTE BACK 방어전 시작 틀 R5
 
-## 현재 단계: 10단계 「백업에서 자료실을 되살립니다」 요약
+## 현재 단계: 12단계 「탈환 작전실을 완성합니다」
 
-이 요약은 10단계 증거만 모았습니다. 자세한 구현·한계는 아래 '10단계 저장점'에 있고, 1~9단계 기록은 그 앞에 단계별로 있습니다.
+12단계 기록은 맨 아래 '12단계 저장점', 11단계는 그 앞, 아래 '10단계' 요약은 10단계 때 모은 증거입니다. 1~9단계 기록은 단계별로 있습니다.
+
+### 10단계 요약 (10단계 때 기록, 그대로 보존)
 
 ### 복구 경로와 사본
 - **복구 경로** (`aleph.config.json`의 `restoreRoute`): `POST /api/notes/restore` · 서비스 `notes` · 로그인 필요 · 본문 `{ "id": "<메모 UUID>" }` (`contentSha256`은 선택, 보내면 사본과 대조).
@@ -341,3 +343,76 @@
 - 다시 실행하는 방법: `npm install` → `npm test`(코드 시험) → `npm run build -- --local`(화면 파일 준비) → 변경을 모두 커밋한 뒤 `npm run bundle`(제출 묶음, `bundle-notes.json`·`artifacts/`는 Git에 올리지 않음). 배포 주소에서 로그인하고 「기기 승인 확인 요청」을 눌러 정상(메모 화면 열림)과 거부(닫힘)를 확인합니다.
 - 로그인 토큰: Supabase 로그인 모듈의 기본 설정이 토큰을 브라우저 `localStorage`에 남기므로 `persistSession: false`로 바꿔 화면 메모리에만 둡니다(새로고침하면 다시 로그인). 실제 모듈에 가짜 로그인 응답을 줘서 수정 전에는 `sb-…-auth-token`이 저장되고 수정 후에는 `localStorage`·`sessionStorage`가 비어 있는 것을 Chromium에서 확인했습니다.
 - 화면 문구(안 C): 심판이 "설치 표시나 승인 버튼만으로 신뢰"로 본 것을 줄이려고, 설치·기기 확인·승인을 서로 붙여 주장하던 문구를 서버 응답(허용됨/거부됨, HTTP 상태)만 적는 문구로 바꿨습니다. 동작은 그대로입니다. 판정기가 서명 없는 모양의 가상 요청을 모두 거부하는 것은 확인했지만, 서버 함수는 기기 서명을 확인하지 않아(로그인 토큰만 확인) 「설치형 앱 서명 없이 보호 요청」이 통하는 구멍은 이 변경으로 막히지 않았을 수 있습니다.
+
+## 12단계 저장점: 탈환 작전실을 완성합니다
+
+- 화면(`public/war-room.html`, 자료실 첫 화면의 「탈환 작전실 열기」 링크): 판정기 규칙·탐지 사건·회수 상태·복구 버전 네 칸. 로그인 뒤 「작전실 읽기」를 누르면 `GET /api/war-room`의 응답만 보여 줍니다. 칸마다 「서버 응답에서 확인됨」·「미실행」·「읽지 못함」·「아직 요청하지 않음」을 구분하고, 성공·통과 판정은 하지 않습니다.
+- 서버(`src/war-room.mjs`, `src/notes-handler.mjs`, `vercel.json`의 `/api/war-room` → `/api/notes?warRoom=1`): 로그인한 본인 것만 가려서 돌려줍니다. 메모 제목·본문·사용자 ID는 읽지 않고, 메모 ID는 끝 4자리, 해시는 앞 8자리만 보냅니다. `api/` 함수 파일은 늘리지 않았습니다.
+- 확인됨으로 적는 것: 판정기 규칙 이름과 개수, 정책 사본 `safe-v9`와 현재 코드 정책의 일치 여부(서버 코드 값이며 반 엔진이 지금 적용 중인 정책이라는 뜻은 아님), 내 사본 건수·복원 기록 건수. 복구 표의 줄 수와 서버 보고 건수는 화면이 직접 비교해 「일치」·「불일치」로 적습니다.
+- 미실행으로 적는 것: 탐지 사건(이 저장소에는 사건을 모아 두는 곳이 없음), 회수 상태(운영 반 엔진이 가지며 읽는 길이 없음). 값을 만들어 채우지 않습니다. `detect:test`·`decider:test`는 가상 연습이며 심판의 판정이 아닙니다.
+- SQL: `supabase/12-war-room.sql`을 학생이 직접 실행해 서버 전용 키에 복원 감사 표의 읽기 권한을 더했습니다(실행하지 않으면 복구 칸은 「읽지 못함」). 감사 표의 추가만 가능한 장치는 그대로입니다.
+- 설정: `aleph.config.json`의 `step`은 12, `allowedRoutes`에 `GET /api/war-room`을 더했습니다. `judgeIssuer`·`repoUrl`·`publicAppUrl`·`originalApiUrl`·`restoreRoute`와 `src/decider.mjs`(`RULE_IDS` 5개)는 바꾸지 않았습니다. 이 경로를 판정기 구역 표에 넣지 않아 반 엔진이 판정기에 거치게 하면 거부될 수 있고, 새 경로가 심판 쪽 등록과 맞는지는 확인하지 못했습니다.
+- `src/attack-check.mjs`: `anonymous_war_room`(토큰 없는 `GET /api/war-room`이 401인지, 실제로 보낸 요청의 상태 코드)과 `war_room_screen_matches_server`(**미실행**)를 더했습니다.
+- 확인한 것(2026-10-14, 가짜 DB·가상 요청): `npm test` 89개 통과, `decider:test`·`detect:test`·`policy:verify` 통과. 화면의 건수는 본인 기록만 세고 다른 사람 기록은 세지 않으며, 응답에 본문·제목·전체 ID·전체 해시·사용자 ID가 없음을 시험했습니다. 세 괴물 연속 시험(무인증 조회 뒤 타인 메모, 미등록 기기 뒤 회수된 신원, 복구 뒤 서명 없는 변경과 구역 밖 조회)은 가짜 DB·판정기로만 했고 실제 41종 공격 방어나 심판의 판정이 아닙니다.
+- 화면 확인(2026-10-14, 학생이 실제 배포 주소·실제 시험 계정으로 직접 확인하고 알려 준 내용이며 제가 화면을 본 것은 아닙니다):
+  - 작전실(`/war-room.html`): 로그인 뒤 「작전실 읽기」의 네 칸 표시가 서버 응답과 맞았습니다(판정기·복구는 서버 응답에서 확인됨, 탐지·회수는 미실행, 복구 표 줄 수와 서버 보고 건수 일치).
+  - 11단계 접속 앱(`/`): 로그인 전 잠김 → 로그인 직후에도 잠김(「기기 승인 요청」 버튼만 나타남) → 승인 요청 뒤 HTTP 200으로 열리고 내 메모만 보임 → 로그아웃·재로그인 뒤 다시 잠김, 모두 의도대로였습니다.
+- 확인하지 못한 것: 서버가 403으로 거부하는 실제 경우(기기 승인은 운영 반 엔진이 하므로 학생 쪽에서 만들 수 없고 가짜 서버 응답의 Chromium 시험까지만 있음), 5단계 ①~④, 41종 총공세(심판 담당). 배포와 시험 계정 A·B의 로그인 요청은 아래 점검표 두 번째 실행에서 확인했습니다.
+- 다시 실행하는 방법: `npm install` → `npm test` → `npm run build -- --local` → 변경을 모두 커밋한 뒤 `npm run bundle`(`bundle-notes.json`·`artifacts/`는 Git에 올리지 않음). 배포 뒤 `/war-room.html`에서 로그인하고 「작전실 읽기」를 눌러 정상(판정기·복구 확인됨, 탐지·회수 미실행)과 거부(로그인 없는 `/api/war-room`은 401)를 확인합니다.
+
+### 12단계 탈환 점검표: 1~11단계 정상·금지 요청을 한 표로
+
+- 명령: `npm run recapture:table` (`scripts/recapture-table.mjs`). 기본 대상은 `aleph.config.json`의 `publicAppUrl`이고, 다른 주소는 `-- --base https://…`로 줍니다. 결과는 화면에 표로 나오고 `artifacts/recapture-table.md`·`.json`에 저장됩니다(Git에 올리지 않음).
+- 열: 단계 · 구분(정상/금지) · 요청 · 기대 결과 · 실제 결과 · 판정 · 요청 ID · 확인 시각(UTC) · 출처. 요청 ID는 이 명령이 요청마다 만들어 `X-Request-Id`로 보낸 UUID이고, 서버가 돌려준 `x-vercel-id`가 있으면 `/` 뒤에 붙습니다. 가상 연습 줄은 가상 요청의 `requestId`입니다.
+- 판정 칸은 `일치`·`불일치`·`미실행`·`미확인(요청 실패)`만 씁니다. 「통과」는 쓰지 않습니다. 기대와 다른 실제 응답은 `불일치`로 그대로 남습니다.
+- 출처 구분: **실제 배포 API**(실제로 보낸 요청의 상태 코드) · **로컬 가상 연습**(이 저장소의 `decide()`·`detect()`를 직접 부른 결과이며 반 엔진이 아님, 6~9단계) · **화면**(11단계, 미실행) · **심판**(41종, 미실행).
+- 로그인이 필요한 줄(정상 CRUD, B가 A의 메모를 읽기·수정·삭제하면 404, 복구, 작전실)은 시험 계정 환경변수가 있을 때만 보냅니다. 학생이 자기 터미널에서 `ALEPH_A_EMAIL`·`ALEPH_A_PASSWORD`·`ALEPH_B_EMAIL`·`ALEPH_B_PASSWORD`(가상 시험 계정)와, 복구 줄을 위해 `ALEPH_RESTORE_NOTE_ID`(B의 사본 메모 UUID)를 직접 설정하고 실행합니다. 값은 파일·Git·답변에 넣지 않습니다. 없으면 그 줄은 `미실행`입니다. 로그인 줄은 A 계정에 「작전실 시험용 가상 메모」를 하나 만들었다가 같은 실행에서 지웁니다. 응답 본문, 토큰, 이메일은 표에 적지 않습니다.
+- 첫 실행(2026-10-14, 배포 전, 비로그인 요청과 가상 연습만): 일치 21 · 불일치 1 · 미실행 12. 불일치 1건은 토큰 없는 `GET /api/war-room`이 401이 아닌 **404**였습니다. 배포 주소가 아직 이 저장점이 아닌 이전 배포였기 때문입니다.
+- 두 번째 실행(2026-10-14, 배포 반영 뒤): 토큰 없는 `GET /api/war-room`은 **HTTP 401, 일치**로 바뀌었습니다. 학생이 가상 시험 계정 A·B와 복구용 사본 메모 id를 자기 터미널의 환경변수로 직접 넣어 실행했고, 결과는 **일치 32 · 불일치 0 · 미확인 0 · 미실행 2**입니다. 미실행 2개는 11단계 화면 확인과 41종 총공세이며 통과 처리하지 않았습니다. 로그인 줄(A의 목록·추가·자기 메모 읽기·삭제·작전실 200, B가 A의 메모를 읽기·수정·삭제하면 404, B 복구 200, A가 B의 사본을 복원하면 404)은 미실행 목록에 없고 모두 일치로 집계됐습니다. 이 집계와 미실행 줄은 학생이 실행 화면에서 알려 준 내용이고, 표 전체(`artifacts/recapture-table.md`)는 학생 컴퓨터에만 있으며 Git에 올리지 않습니다. 이 실행으로 B의 메모 한 건이 사본 내용으로 복원됐고 복원 기록이 한 줄 늘었습니다.
+- 번들: 배포 반영 뒤 `npm run bundle`을 다시 만들어 `anonymous_war_room` 항목이 **HTTP 401로 거부됨**으로 기록됐음을 확인했습니다(번들은 로그인하지 않아 로그인 항목은 미실행). 이 표와 번들은 심판의 판정이 아닙니다.
+- 번들 격리 환경: 심판은 `npm run bundle`을 `node:fs`·`path`·`url`·`child_process`(git 읽기)·`crypto`만 쓸 수 있고 HTTPS GET·HEAD만 보낼 수 있는 환경에서 돌립니다. 그래서 `src/attack-check.mjs`는 `Buffer`를 쓰지 않고(base64url을 직접 만듦) 토큰 없는 POST·PUT·DELETE·복구 점검 네 개는 요청을 보내지 않고 `미실행(not_run)`으로 기록합니다. 그 네 요청이 401로 거부되는 실제 결과는 `npm run recapture:table`(학생 터미널)에서 확인합니다. 심판의 「실행 기록 대조」(점검별 요청 기록 없음) 판정을 보고, 점검마다 자기 요청을 보내고 `X-Attack-Id`(점검 이름)와 `X-Request-Id`(`node:crypto`의 `randomUUID`)를 붙이게 했습니다. 처음 붙인 `X-Attack-Id`만으로는 같은 판정이 반복돼, 실제로 요청을 보낸 점검의 `observed` 끝에 요청 ID와 확인 시각을 적게 했습니다(응답 처리와 판정 문구는 그대로이며, 이 방식이 심판의 대조 방식과 맞는지는 재제출 결과로만 알 수 있습니다).
+- 확인용 설정(`aleph.config.json`의 `bundleNetwork: "off"`): 위 두 변경 뒤에도 심판의 「실행 기록 대조」 판정(요청을 보냈다고 적은 점검 6개의 `attackId`별 요청 기록 없음)이 세 번 반복됐고, 포털의 12단계 안내에는 심판이 요청 기록을 어떻게 대조하는지 설명이 없습니다. 그래서 심판의 규칙(요청을 보내지 않은 점검은 `not_run`으로 적는다)에 따라 `npm run bundle`이 요청을 하나도 보내지 않고 요청 점검 6개를 `미실행(not_run)`으로 기록하게 했습니다. 이 6개의 실제 요청 결과(예: 토큰 없는 `GET /api/war-room` 401)는 `npm run recapture:table`의 표에 있고, 번들에는 들어가지 않습니다. 이 설정이 심판 판정에 어떤 영향을 주는지는 재제출 결과로 확인하는 시험이며, 되돌릴 때는 이 설정 한 줄을 지우면 이전 동작(요청을 보내 실제 결과를 기록)으로 돌아갑니다. 앞의 변경은 심판의 첫 번째 번들 실패(`Buffer is not defined`, 이어서 `node:buffer` 사용 불가)를 보고 고친 것이며, 심판 환경을 직접 본 것은 아니고 알려 준 제한을 모의한 시험(전역 `Buffer` 없음, GET·HEAD만 허용)으로 확인했습니다.
+
+## 설치·실행·중지·복구 안내 (이 12단계 저장점 기준, 2026-10-14)
+
+이 안내는 이 저장점의 파일과 이력을 읽고 적었습니다. `npm test` 89개 통과(가짜 DB·가상 요청)와, 실제 배포 주소에 대한 점검표(비로그인 요청과 시험 계정 A·B의 로그인 요청)를 실행했습니다. 새 Vercel 프로젝트에서 이 순서대로 처음부터 해 본 시험은 아직 하지 않았고, 41종은 미실행입니다. 로그인한 화면(11단계 접속 앱, 작전실)은 학생이 직접 확인했습니다. 심판의 판정이 아닙니다.
+
+### 출처: 제공된 것과 학생 몫
+| 구분 | 무엇 | 이 저장소에서 |
+|---|---|---|
+| **ALEPH SDP 엔진 (제공)** | 반 엔진: 신원·기기·경로 확인 → 판정기 호출, 사건 전달, 접속 회수 집행, 정책 등록부(`allowedReasonCodes`), 심판 접수 | **코드가 없습니다.** 계약 문서 `docs/DECIDER_REQUEST.md`(`aleph.decision.v1`)·`docs/DETECT_EVENTS.md`로만 연결됩니다. 엔진을 학생이 만들었다고 쓰지 않습니다. |
+| **시작 틀 (제공, `Initial commit` `cf1072b`)** | `scripts/decider-test.mjs`·`fixture-7.mjs`·`detect-test.mjs`·`xdr-run.mjs`·`build-public.mjs`·`deployment-identity.mjs`·`bundle.mjs`, `src/verify-login.mjs`, `api/ai.js`·`api/threat-intel.js`(501 뼈대), `package/` 양식, 처음의 `src/decider.mjs`(모두 거부)·`src/detect.mjs`(회수 안 함) | 학생 코드가 아님. `judgeIssuer`는 운영 측이 채운 값이라 바꾸지 않습니다. |
+| **학생 몫 (코딩 도구와 단계별로 제작)** | 판정기 규칙 5개(`src/decider.mjs`의 `RULE_IDS`), 탐지 규칙(`src/detect.mjs`), 접속 앱(`public/index.html`·`sw.js`·`manifest.webmanifest`·`offline.html`), 자료실 서버(`src/notes-handler.mjs`·`note-restore.mjs`·`war-room.mjs`), 정책 사본·복원(`src/policy-restore.mjs`·`policy/`), 작전실(`public/war-room.html`), 점검(`src/attack-check.mjs`·`scripts/recapture-table.mjs`), SQL(`supabase/`) | 경계는 `git log`로 확인합니다. `src/note-restore.mjs` 머리 주석에는 초안을 Gemini가 썼고 학생 쪽에서 고쳤다고 적혀 있습니다. |
+
+- 학생 판정기·탐지는 엔진이 부를 함수일 뿐, 엔진을 대신하지 않습니다. `npm run decider:test`·`detect:test`는 가상 연습이며 반 엔진의 사건 전달·접속 회수가 연결됐다는 증거가 아닙니다.
+
+### 비밀값: 이 저장소에 없습니다
+- 값은 저장소·README·로그·제출 묶음에 넣지 않습니다. 이름만 적습니다.
+- 서버(Vercel 환경변수의 비밀 입력란에 학생이 직접 입력): `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`(서버 전용 키, 브라우저·화면에 넣지 않음).
+- 점검용(학생 자기 터미널에서만, 파일에 저장하지 않음): `ALEPH_A_EMAIL`, `ALEPH_A_PASSWORD`, `ALEPH_B_EMAIL`, `ALEPH_B_PASSWORD`, `ALEPH_RESTORE_NOTE_ID`.
+- Git에 올리지 않는 것: `bundle-notes.json`, `artifacts/`, `.env`, `supabase/schema.sql`(메모 문장 포함).
+
+### 설치 (재현 순서)
+1. 준비: Node.js 22 이상, GitHub 계정, Vercel 계정, Supabase 프로젝트(`public.notes` 표는 Git 제외인 `supabase/schema.sql`로 학생이 만듦).
+2. 받기: `git clone https://github.com/msk4905/choi-bujang-secret-vault` → `cd choi-bujang-secret-vault` → `git log -1 --format="%h %s"`로 제목이 `12단계 저장점`인지 확인(기본 브랜치 `main`이 이 저장점) → `npm install`.
+3. 코드 시험: `npm test` (가짜 DB·가상 요청, 실제 서버를 쓰지 않음).
+4. 가상 연습: `npm run decider:test` · `npm run detect:test` · `npm run policy:verify`(사본 검증, 실행 기록을 `policy/`에 덧붙임).
+5. 표 만들기: Supabase SQL Editor에서 학생이 직접 `supabase/10-restore-tables.sql`, `supabase/12-war-room.sql`을 실행합니다. 사본 만들기 문장은 주석이며 `<NOTE_UUID>`·`<B_USER_UUID>`를 학생이 바꿔 침해 **전에** 실행합니다.
+6. 배포: Vercel에서 **새 프로젝트**로 이 저장소를 연결하고, 위 환경변수 세 개를 비밀 입력란에 넣은 뒤 배포합니다(`vercel.json`이 `npm run build`와 `public` 폴더를 정함). 쓰던 프로젝트의 설정을 복사했다고 가정하지 않습니다.
+7. 확인: 배포 주소를 열고 시험 계정으로 로그인 → 「기기 승인 확인 요청」 → 자료실이 열리는지, `/war-room.html`에서 「작전실 읽기」, 마지막으로 `npm run recapture:table`(위 '탈환 점검표' 절차).
+
+### 실행
+- 로컬에는 따로 띄우는 서버가 없습니다. 화면 자료는 `npm run build -- --local`로 `public/`에 준비하고, 자료 요청은 배포된 서버 함수(`api/notes.js` → `src/notes-handler.mjs`)가 처리합니다. 실제 동작 확인은 배포 주소에서 합니다.
+- 판정기·탐지는 이 저장소에서는 함수 호출 연습으로만 돌고, 실제 호출은 ALEPH SDP 엔진이 합니다.
+
+### 중지
+- 로컬: 실행 중인 프로세스가 없어 멈출 것이 없습니다.
+- 사용자 접속: 화면의 「로그아웃」. 토큰은 화면 메모리에만 있어 새로고침해도 사라집니다.
+- 접속 회수: 이 저장소의 `detect()`는 회수를 **제안**만 하고 집행하지 않습니다. 실제 회수는 엔진이 합니다.
+- 앱 전체를 멈출 때: Vercel 프로젝트 화면에서 배포를 내리거나 프로젝트를 삭제하고, 필요하면 Supabase에서 서버 전용 키를 새로 발급해 옛 키를 폐기합니다(메뉴 이름은 바뀔 수 있으니 각 서비스 화면에서 확인). 기존 학생 자료를 지우는 명령은 쓰지 않습니다.
+
+### 복구
+- 코드: 문제가 생긴 커밋을 `git revert <커밋>`으로 되돌립니다. `git reset --hard`는 쓰지 않습니다. 배포는 Vercel에서 이전 정상 배포로 되돌리거나 되돌린 커밋을 다시 배포합니다.
+- 판정기 정책: `npm run policy:diff`로 사본(`safe-v9`)과의 차이를 보고, `npm run policy:restore`는 미리보기만 하며 `-- --confirm <확인 코드>`를 줄 때만 되돌립니다. 다른 서비스 규칙과 `policy/audit.jsonl`은 보존됩니다.
+- 메모 한 건: 로그인한 본인이 `POST /api/notes/restore`(`{ "id": "<메모 UUID>" }`)로 사본과 같은 한 건만 복원합니다. 사본이 없거나 남의 것이면 404, 사본이 손상됐거나 해시가 다르면 409입니다. 전체 데이터베이스를 되돌리는 기능은 없습니다.
+- 복구 뒤: `npm test` → `npm run recapture:table`로 정상·금지 요청을 다시 확인합니다. 41종 총공세는 심판이 하며 이 안내나 점검표로 통과 처리하지 않습니다.
