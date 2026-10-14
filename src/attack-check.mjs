@@ -3,7 +3,7 @@
 const STARTER_MARKER = 'SAMPLE_NOTE_1';
 
 export async function runAttackChecks(config) {
-  if (![2, 3, 4, 5, 6, 7, 8, 9].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (![2, 3, 4, 5, 6, 7, 8, 9, 10].includes(config.step)) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -99,6 +99,7 @@ async function apiChecks(app, config) {
     update: await send(app, 'PUT', `/api/notes/${NIL_ID}`, { body: {} }),
     remove: await send(app, 'DELETE', `/api/notes/${NIL_ID}`),
     forged: await send(app, 'GET', '/api/notes', { token: forged }),
+    ...(config.step >= 10 ? { restore: await send(app, 'POST', '/api/notes/restore', { body: {} }) } : {}),
   };
   return [
     { attackId: 'anonymous_api_list', expected: '토큰 없는 GET /api/notes가 401로 거부됨', observed: describe('토큰 없는 GET /api/notes', results.list) },
@@ -106,6 +107,13 @@ async function apiChecks(app, config) {
     { attackId: 'anonymous_api_update', expected: '토큰 없는 PUT /api/notes/:id가 401로 거부됨', observed: describe('토큰 없는 PUT /api/notes/:id', results.update) },
     { attackId: 'anonymous_api_delete', expected: '토큰 없는 DELETE /api/notes/:id가 401로 거부됨', observed: describe('토큰 없는 DELETE /api/notes/:id', results.remove) },
     { attackId: 'forged_token_list', expected: '서명 없는 위조 토큰의 GET /api/notes가 401로 거부됨', observed: describe('위조 토큰 GET /api/notes', results.forged) },
+    ...(config.step >= 10 ? [
+      { attackId: 'anonymous_note_restore', expected: '토큰 없는 POST /api/notes/restore가 401로 거부됨', observed: describe('토큰 없는 POST /api/notes/restore', results.restore) },
+      { attackId: 'note_restore_owner_b_only', expected: '시험 계정 B가 사본의 B 메모 한 건만 복원하고, A 로그인으로 같은 ID를 복원하면 404이며 다른 메모·감사 기록은 그대로임',
+        observed: '미실행: 이 점검은 A·B 로그인 계정과 실제 Supabase 사본을 쓰지 않음. 가짜 DB 시험(node --test test/note-restore.test.mjs)만 했고 심판의 판정이 아님' },
+      { attackId: 'policy_restore_decider', expected: '판정기 정책(src/decider.mjs의 POLICY)을 검증한 안전 정책 사본(safe-v9)으로 되돌리면 변조로 열렸던 금지 요청이 다시 거부되고 정상 요청은 허용됨',
+        observed: '미실행: 이 점검은 요청을 보내지 않음. npm run policy:verify로 저장된 사본을 다시 읽어 검증한 기록과 npm run policy:test의 임시 폴더 시험·가상 요청만 있으며 배포 환경의 정책이나 심판의 판정이 아님' },
+    ] : []),
     ...(config.step >= 4 ? [{ attackId: 'cross_owner_access', expected: 'B 로그인으로 A의 메모 id를 읽기·수정·삭제하면 404로 거부되고 소유자 변경도 거부됨',
       observed: '미실행: 이 점검은 A·B 로그인 계정을 쓰지 않음. 학생이 두 계정으로 직접 확인해야 함' }] : []),
     ...(config.step >= 6 ? [{ attackId: 'unregistered_device', expected: '등록하지 않은 기기의 요청이 판정기에서 deny·device_not_registered로 거부됨',

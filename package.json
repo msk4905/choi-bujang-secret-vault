@@ -4,13 +4,19 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build-public.mjs",
+    "test": "node --test test/*.test.mjs",
     "test:r5": "node --test test/r5.test.mjs",
     "test:package": "node --test test/package-starter.test.mjs",
     "bundle": "node scripts/bundle.mjs",
     "decider:test": "node scripts/decider-test.mjs",
     "detect:test": "node scripts/detect-test.mjs",
     "fixture:7": "node scripts/fixture-7.mjs",
-    "xdr:run": "node scripts/xdr-run.mjs"
+    "xdr:run": "node scripts/xdr-run.mjs",
+    "policy:diff": "node scripts/policy-restore.mjs diff",
+    "policy:restore": "node scripts/policy-restore.mjs restore",
+    "policy:test": "node --test test/policy-restore.test.mjs test/note-restore.test.mjs",
+    "policy:snapshot": "node scripts/policy-restore.mjs snapshot",
+    "policy:verify": "node scripts/policy-restore.mjs verify"
   },
   "engines": {
     "node": ">=22"
