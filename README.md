@@ -212,6 +212,13 @@
 - 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없습니다.
 - 알아 둘 점: `decide.mjs`는 이름 있는 패턴 밖의 경보도 경보 자신의 T1190 표시와 반복 횟수로 판정합니다(명령 구분자 경보 1건이 block, 반복 없는 애매한 9건이 alert). `203.0.113.10`은 brute-force와 웹 주입 규칙이 둘 다 있어, `brute-force/respond.mjs`를 다시 실행하면 주소 기준 합치기 때문에 웹 주입 규칙 하나가 사라질 수 있습니다.
 
+## 보너스 xdr-03 저장점: 알려진 취약점 악용 탐지
+
+- 작동하는 것: `xdr/known-cve/decide.mjs`가 연습 경보 24건을 block 8·alert 8·record 8로 나눕니다. 패턴 근거는 `patterns.json`(CVE-2021-44228 형태 요청, MITRE T1190: 머리글·요청 인자 안의 원격 조회 구문, 점검 도구 흔적), 확인용 읽기는 `read-alerts.mjs`, 거부 규칙과 알림 기록은 `respond.mjs`가 `xdr/deny-rules.json`·`xdr/alerts.log`에 씁니다. `respond.mjs`는 다른 모듈의 규칙을 건드리지 않고 `xdr.known-cve.` 규칙만 고치며, 같은 주소에 정상 이벤트가 있으면 규칙을 만들지 않습니다.
+- 다시 실행: `npm run xdr:run -- known-cve`로 `result.json`을 만들고, `node xdr/known-cve/respond.mjs`로 규칙·알림을 만듭니다. 연습 경보에 맞춘 로컬 결과이며 심판의 판정이 아닙니다. 정상 이벤트(`kc-17`~`kc-24`)는 모두 record였습니다.
+- 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없습니다. `respond.mjs`는 이번 저장점에서 복사본으로만 시험했고 실제 `deny-rules.json`·`alerts.log`에는 실행하지 않았습니다.
+- 알아 둘 점: `203.0.113.10`에는 brute-force·web-injection 규칙도 있습니다. `brute-force/respond.mjs`는 규칙을 주소 기준으로 합치므로, 그 파일을 다시 실행하면 이 주소의 다른 모듈 규칙이 하나로 합쳐질 수 있습니다. 구문 탐지는 완전한 형태와 일부 감싸기·이중 인코딩만 봅니다.
+
 ## 6단계 저장점: 등록한 기기만 자료실에 들어옵니다
 
 - 규칙: `src/decider.mjs`의 `device_registered` 하나입니다. `request.deviceRegistered`가 `true`일 때만 `allow`(이유 코드 `approved`)이고, `false`이거나 값이 없거나 `true`가 아닌 값이면 `deny`와 이유 코드 `device_not_registered`입니다. 사용자·기기 정보는 계약에 있는 `subjectId`, `deviceId`, `deviceRegistered`만 봅니다(`docs/DECIDER_REQUEST.md`).
