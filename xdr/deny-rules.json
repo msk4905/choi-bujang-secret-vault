@@ -194,6 +194,112 @@
       "reason": "요청 인자 안의 SQL 구문",
       "createdAt": "2026-10-11T10:54:51.918Z",
       "expiresAt": "2026-10-11T11:54:52.014Z"
+    },
+    {
+      "ruleId": "xdr.exfiltration.deny.203.0.113.50",
+      "dstip": "203.0.113.50",
+      "direction": "outbound",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "ex-01",
+        "ex-03"
+      ],
+      "confidence": 0.99,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)",
+      "createdAt": "2026-10-14T07:17:47.566Z",
+      "expiresAt": "2026-10-14T08:17:47.675Z"
+    },
+    {
+      "ruleId": "xdr.exfiltration.deny.198.51.100.40",
+      "dstip": "198.51.100.40",
+      "direction": "outbound",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "ex-02",
+        "ex-04"
+      ],
+      "confidence": 0.99,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)",
+      "createdAt": "2026-10-14T07:17:47.566Z",
+      "expiresAt": "2026-10-14T08:17:47.675Z"
+    },
+    {
+      "ruleId": "xdr.exfiltration.deny.203.0.113.55",
+      "dstip": "203.0.113.55",
+      "direction": "outbound",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "ex-05"
+      ],
+      "confidence": 0.99,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)",
+      "createdAt": "2026-10-14T07:17:47.566Z",
+      "expiresAt": "2026-10-14T08:17:47.675Z"
+    },
+    {
+      "ruleId": "xdr.exfiltration.deny.192.0.2.90",
+      "dstip": "192.0.2.90",
+      "direction": "outbound",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "ex-06"
+      ],
+      "confidence": 0.85,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)",
+      "createdAt": "2026-10-14T07:17:47.566Z",
+      "expiresAt": "2026-10-14T08:17:47.675Z"
+    },
+    {
+      "ruleId": "xdr.exfiltration.deny.198.51.100.45",
+      "dstip": "198.51.100.45",
+      "direction": "outbound",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "ex-07"
+      ],
+      "confidence": 0.9,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)",
+      "createdAt": "2026-10-14T07:17:47.566Z",
+      "expiresAt": "2026-10-14T08:17:47.675Z"
+    },
+    {
+      "ruleId": "xdr.exfiltration.deny.203.0.113.60",
+      "dstip": "203.0.113.60",
+      "direction": "outbound",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "ex-08"
+      ],
+      "confidence": 0.99,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)",
+      "createdAt": "2026-10-14T07:17:47.566Z",
+      "expiresAt": "2026-10-14T08:17:47.675Z"
+    },
+    {
+      "ruleId": "xdr.exfiltration.deny.203.0.113.61",
+      "dstip": "203.0.113.61",
+      "direction": "outbound",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "ex-09"
+      ],
+      "confidence": 0.99,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)",
+      "createdAt": "2026-10-14T07:17:47.566Z",
+      "expiresAt": "2026-10-14T08:17:47.675Z"
+    },
+    {
+      "ruleId": "xdr.exfiltration.deny.198.51.100.46",
+      "dstip": "198.51.100.46",
+      "direction": "outbound",
+      "action": "deny",
+      "evidenceAlertIds": [
+        "ex-10"
+      ],
+      "confidence": 0.9,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)",
+      "createdAt": "2026-10-14T07:17:47.566Z",
+      "expiresAt": "2026-10-14T08:17:47.675Z"
     }
   ]
 }
