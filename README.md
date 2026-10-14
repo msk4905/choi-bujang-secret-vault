@@ -219,6 +219,13 @@
 - 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없습니다. `respond.mjs`는 이번 저장점에서 복사본으로만 시험했고 실제 `deny-rules.json`·`alerts.log`에는 실행하지 않았습니다.
 - 알아 둘 점: `203.0.113.10`에는 brute-force·web-injection 규칙도 있습니다. `brute-force/respond.mjs`는 규칙을 주소 기준으로 합치므로, 그 파일을 다시 실행하면 이 주소의 다른 모듈 규칙이 하나로 합쳐질 수 있습니다. 구문 탐지는 완전한 형태와 일부 감싸기·이중 인코딩만 봅니다.
 
+## 보너스 xdr-04 저장점: 몰래 심어진 프로그램 탐지
+
+- 작동하는 것: `xdr/persistence/decide.mjs`가 연습 경보 24건을 block 8·alert 8·record 8로 나눕니다. 패턴 근거는 `patterns.json`(MITRE T1543 서비스, T1053 예약 작업: 서명 없는 새 서비스 등록·낯선 예약 작업·시작 폴더 변경), 확인용 읽기는 `read-alerts.mjs`, 거부 규칙과 알림 기록은 `respond.mjs`가 `xdr/deny-rules.json`·`xdr/alerts.log`에 씁니다. `respond.mjs`는 다른 모듈의 규칙을 건드리지 않고 `xdr.persistence.` 규칙만 고치며, 규칙에는 만료 시각(1시간)과 근거 경보 번호가 붙고 같은 주소에 정상 이벤트가 있으면 규칙을 만들지 않습니다. `decide.mjs`는 다른 파일을 가져오지 않고 파일을 읽거나 쓰지 않습니다.
+- 다시 실행: `npm run xdr:run -- persistence`로 `result.json`을 만들고, `node xdr/persistence/respond.mjs`로 규칙·알림을 만듭니다. 연습 경보에 맞춘 로컬 결과이며 심판의 판정이 아닙니다. 정상 이벤트(`ps-17`~`ps-24`)는 모두 record였고, 애매한 시도(`ps-09`~`ps-16`)는 모두 alert이라 규칙 없이 알림만 남습니다.
+- 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없으므로 실제 접속 격리는 일어나지 않습니다. `respond.mjs`는 복사본으로만 시험했고 실제 `deny-rules.json`·`alerts.log`에는 실행하지 않았습니다. `npm run bundle`의 자기 점검(`src/attack-check.mjs`)은 이번 저장점에서 실행하지 않았습니다.
+- 알아 둘 점: 경보 24건이 모두 같은 PC 이름(`choi-bujang-pc`)을 쓰므로 규칙은 PC 이름이 아니라 출발 주소에만 겁니다. 판정은 연습 경보의 문구에 맞춰 짠 것이라 다른 문구의 경보에서도 같다고 말할 수 없고, `ps-04`의 확신도는 0.86으로 block 기준 0.85에 겨우 넘습니다.
+
 ## 6단계 저장점: 등록한 기기만 자료실에 들어옵니다
 
 - 규칙: `src/decider.mjs`의 `device_registered` 하나입니다. `request.deviceRegistered`가 `true`일 때만 `allow`(이유 코드 `approved`)이고, `false`이거나 값이 없거나 `true`가 아닌 값이면 `deny`와 이유 코드 `device_not_registered`입니다. 사용자·기기 정보는 계약에 있는 `subjectId`, `deviceId`, `deviceRegistered`만 봅니다(`docs/DECIDER_REQUEST.md`).
