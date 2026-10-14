@@ -71,32 +71,32 @@
     {
       "alertId": "ex-12",
       "action": "alert",
-      "confidence": 0.5,
+      "confidence": 0.6,
       "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)"
     },
     {
       "alertId": "ex-13",
-      "action": "record",
-      "confidence": 0,
-      "reason": "맞는 패턴이 뚜렷하지 않아 기록만 합니다."
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "업무 시간 밖 압축 파일 반출 (ex.archive-off-hours)"
     },
     {
       "alertId": "ex-14",
-      "action": "record",
-      "confidence": 0.25,
-      "reason": "맞는 패턴이 뚜렷하지 않아 기록만 합니다."
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)"
     },
     {
       "alertId": "ex-15",
-      "action": "record",
-      "confidence": 0.25,
-      "reason": "맞는 패턴이 뚜렷하지 않아 기록만 합니다."
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)"
     },
     {
       "alertId": "ex-16",
-      "action": "record",
-      "confidence": 0.4,
-      "reason": "맞는 패턴이 뚜렷하지 않아 기록만 합니다."
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)"
     },
     {
       "alertId": "ex-17",
@@ -106,15 +106,15 @@
     },
     {
       "alertId": "ex-18",
-      "action": "record",
-      "confidence": 0,
-      "reason": "맞는 패턴이 뚜렷하지 않아 기록만 합니다."
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)"
     },
     {
       "alertId": "ex-19",
-      "action": "record",
-      "confidence": 0,
-      "reason": "맞는 패턴이 뚜렷하지 않아 기록만 합니다."
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "처음 보는 목적지로 대용량 전송 (ex.large-to-new-destination)"
     },
     {
       "alertId": "ex-20",
@@ -185,7 +185,7 @@
   ],
   "counts": {
     "block": 10,
-    "alert": 4,
-    "record": 16
+    "alert": 10,
+    "record": 10
   }
 }

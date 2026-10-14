@@ -24,6 +24,11 @@ const NEW_DESTINATION = /처음\s*(보|봅)|평소에\s*쓰지\s*않|평소와\s
 const VOLUME_ANOMALY = /평소보다|한\s*번\s*(높|늘)/;
 const OFF_HOURS = /(수업|업무)\s*시간\s*밖/;
 const ARCHIVE = /압축/;
+const COMMAND_CHANNEL = /명령\s*통로/;
+const MASS_READ = /(\d+)\s*건이\s*한\s*번에\s*읽/;
+
+// 의심 신호 하나만 있어도 최소 알림(ALERT_AT)은 되도록 하는 바닥값입니다. 막을 만큼은 아닙니다.
+const SIGNAL_FLOOR = 0.5;
 
 function toCount(value) {
   const n = Number(value);
@@ -45,23 +50,30 @@ function scoreLargeToNew(alert) {
 
   let score = 0;
   if (bytes >= 50 * MB) score = 0.75;
+  else if (bytes >= 10 * MB) score = 0.5;
   else if (bytes >= 5 * MB) score = 0.4;
   else if (bytes >= 1 * MB) score = 0.25;
   else if (bytes >= 100_000) score = 0.1;
-  if (score === 0) return 0;
+
+  // 전송량이 작거나 실패했어도 처음 보는 목적지, 명령 통로, 한꺼번에 읽은 자료는 알릴 만합니다.
+  const massRead = Number(MASS_READ.exec(text)?.[1] ?? 0) >= 10;
+  const weakSignal = NEW_DESTINATION.test(text) || COMMAND_CHANNEL.test(text) || massRead;
+  if (score === 0) return weakSignal ? SIGNAL_FLOOR : 0;
 
   if (NEW_DESTINATION.test(text)) score += 0.15;
   if (VOLUME_ANOMALY.test(text)) score += 0.1;
   if (score >= 0.75 && (files >= 50 || repeats >= 5)) score += 0.1;
+  if (weakSignal) score = Math.max(score, SIGNAL_FLOOR);
   return Math.min(0.99, score);
 }
 
 function scoreArchiveOffHours(alert) {
-  if (!alert?.data?.dstip) return 0;
   const text = describe(alert);
   if (!ARCHIVE.test(text)) return 0;
   const bytes = toCount(alert?.data?.bytes);
   if (bytes < 1 * MB) return 0;
+  // 아직 나가지 않은 큰 압축 파일은 반출 준비일 수 있어 알리기만 합니다.
+  if (!alert?.data?.dstip) return SIGNAL_FLOOR;
 
   let score = 0.5;
   if (OFF_HOURS.test(text)) score += 0.2;
