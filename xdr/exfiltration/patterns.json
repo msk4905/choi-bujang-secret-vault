@@ -1,0 +1,19 @@
+{
+  "schema": "aleph.xdr.patterns.v1",
+  "moduleKey": "exfiltration",
+  "basis": "MITRE ATT&CK T1041 Exfiltration Over C2 Channel, T1048 Exfiltration Over Alternative Protocol",
+  "patterns": [
+    {
+      "id": "ex.large-to-new-destination",
+      "name": "처음 보는 목적지로 대용량 전송",
+      "condition": "평소 쓰지 않던 목적지(dstip)로 전송량(data.bytes)이 크거나 파일 수(data.files)·반복 횟수(data.count)가 많습니다. 목적지가 처음이라는 표시는 rule.description 에서 읽습니다. 크기 기준값은 연습 경보를 보고 학생이 정합니다.",
+      "basis": "T1041·T1048: 공격자는 이미 열린 명령 통로나 평소와 다른 프로토콜·경로로 자료를 한꺼번에 밖으로 보냅니다."
+    },
+    {
+      "id": "ex.archive-off-hours",
+      "name": "업무 시간 밖 압축 파일 반출",
+      "condition": "수업·업무 시간 밖에 압축 파일이 외부 주소로 나갔습니다. 시간대와 압축 파일 여부는 rule.description 에서 읽고, 전송량은 data.bytes 로 함께 봅니다.",
+      "basis": "T1048: 공격자는 자료를 압축해 묶은 뒤 눈에 덜 띄는 시간대에 다른 경로로 반출합니다."
+    }
+  ]
+}

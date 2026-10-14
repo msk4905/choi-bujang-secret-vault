@@ -233,6 +233,13 @@
 - 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 출발 주소가 없어서 지금은 연결할 수 없으므로 실제 접속 격리는 일어나지 않습니다. `respond.mjs`는 임시 폴더 복사본으로만 시험했고 실제 `deny-rules.json`·`alerts.log`에는 실행하지 않았습니다(차단 후보 9건은 규칙 8개가 되며 `pv-01`·`pv-02`가 같은 주소입니다). `npm run bundle`의 자기 점검(`src/attack-check.mjs`)은 이번 저장점에서 실행하지 않았습니다.
 - 알아 둘 점: 판정은 연습 경보의 문구에 맞춘 것이라 다른 문구의 경보에서도 같다고 말할 수 없고, block 경보의 확신도 0.88은 기준 0.85와 여유가 크지 않습니다. 애매한 시도(`pv-10`~`pv-17`)는 경보 자신의 T1068·T1078 표시를 근거로 alert이 되어 규칙 없이 알림만 남습니다. `brute-force/respond.mjs`를 다시 실행하면 주소 기준 합치기 때문에 다른 모듈의 규칙이 합쳐질 수 있습니다(이번 모듈의 주소는 다른 모듈과 겹치지 않았습니다).
 
+## 보너스 xdr-06 저장점: 자료 빼돌리기 탐지
+
+- 작동하는 것: `xdr/exfiltration/decide.mjs`가 연습 경보 30건을 block 10·alert 10·record 10으로 나눕니다. 패턴 근거는 `patterns.json`(MITRE T1041·T1048: 처음 보는 목적지로 대용량 전송, 업무 시간 밖 압축 파일 반출), 확인용 읽기는 `read-alerts.mjs`(시각·출발 주소·계정·규칙 수준·설명만 뽑고 비밀값처럼 보이는 값은 가림), 거부 규칙과 알림 기록은 `respond.mjs`가 `xdr/deny-rules.json`·`xdr/alerts.log`에 씁니다. `respond.mjs`는 다른 모듈의 규칙을 건드리지 않고 `xdr.exfiltration.` 규칙만 고치며, 규칙은 자료가 나간 목적지(`dstip`)에 걸고 만료 시각(1시간)과 근거 경보 번호가 붙습니다. 정상 이벤트가 쓰는 목적지에는 규칙을 만들지 않습니다. `decide.mjs`는 다른 파일을 가져오지 않고 파일을 읽거나 쓰지 않습니다.
+- 다시 실행: `npm run xdr:run -- exfiltration`으로 `result.json`을 만들고(`counts`가 block 10·alert 10·record 10, 정상 이벤트 `ex-21`~`ex-30`은 모두 record), `node xdr/exfiltration/read-alerts.mjs`로 경보 30건과 뽑은 줄 30줄이 같은지 봅니다. `node xdr/exfiltration/respond.mjs`는 실제 `deny-rules.json`·`alerts.log`에 쓰므로 반영하려 할 때만 실행합니다. 연습 경보에 맞춘 로컬 결과이며 심판의 판정이 아닙니다.
+- 아직 아닌 것: 거부 규칙을 ZTNA 판정기(`src/decider.mjs`)에 연결하지 않았습니다. 요청 계약에 목적지 값이 없어 연결하지 않았고, 규칙은 기록까지입니다.
+- 알아 둘 점: 판정은 연습 경보의 문구와 전송량에 맞춘 것이라 다른 경보에서도 같다고 말할 수 없습니다. 애매한 시도(`ex-11`~`ex-20`)는 모두 alert이라 규칙 없이 알림만 남습니다.
+
 ## 6단계 저장점: 등록한 기기만 자료실에 들어옵니다
 
 - 규칙: `src/decider.mjs`의 `device_registered` 하나입니다. `request.deviceRegistered`가 `true`일 때만 `allow`(이유 코드 `approved`)이고, `false`이거나 값이 없거나 `true`가 아닌 값이면 `deny`와 이유 코드 `device_not_registered`입니다. 사용자·기기 정보는 계약에 있는 `subjectId`, `deviceId`, `deviceRegistered`만 봅니다(`docs/DECIDER_REQUEST.md`).
