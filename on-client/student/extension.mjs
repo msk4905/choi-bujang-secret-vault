@@ -169,6 +169,97 @@ function sessionSection(sessions) {
   });
 }
 
+// ---------- 14단계 보조 함수: 업무 앱 접속 판정 표시 (renderDecision 전용) ----------
+// 13단계 보조 함수(makeNode, plainText, MODE_TEXT, modeNote)는 바꾸지 않고 그대로 쓴다.
+// DOM은 createElement 와 textContent 로만 만든다. 이전 판정을 모듈 안에 저장하지 않는다.
+// 호출할 때마다 받은 입력만으로 새 요소를 만들기 때문에, 새 입력이 오면 이전 판정은 남지 않는다.
+
+// 판정은 한국어 뜻과 원래 값을 함께 보여 준다. 목록에 없는 값은 unknown 으로 읽는다.
+const DECISION_TEXT = {
+  allow: {
+    label: '허용',
+    className: 'decision decision-allow',
+    note: '서버 정책상 접근이 허용되었습니다. 실제 앱 접속 성공을 보장하지는 않습니다.',
+  },
+  deny: {
+    label: '거부',
+    className: 'decision decision-deny',
+    note: '서버가 접근을 거부했습니다.',
+  },
+  challenge: {
+    label: '추가 확인 필요',
+    className: 'decision decision-challenge',
+    note: '서버가 추가 확인을 요구했습니다. 이 앱은 확인 절차를 대신 수행하지 않으며, 접근이 허용된 것은 아닙니다.',
+  },
+  unknown: {
+    label: '확인 불가',
+    className: 'decision decision-unknown',
+    note: '서버가 판정을 확인하지 못했습니다. 허용으로 간주하지 마세요.',
+  },
+};
+
+function decisionTime(value) {
+  if (typeof value !== 'string' || !value.trim()) return '시각 정보 없음';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return `시각 형식 오류(${value})`;
+  return `${date.toLocaleString('ko-KR')} (${value})`;
+}
+
+function decisionSection(input) {
+  const { status, mode, data, error, appId } = input && typeof input === 'object' ? input : {};
+  const app = plainText(appId, '');
+  const section = makeNode('section');
+  section.append(makeNode('h3', '업무 앱 접속 판정'));
+
+  if (status === 'idle') {
+    section.append(makeNode('p', '앱을 골라 접속을 요청하세요', 'state state-empty'));
+    return section;
+  }
+  if (status === 'loading') {
+    const loading = makeNode('p', `${app ? `${app}: ` : ''}판정 확인 중…`, 'state state-loading');
+    loading.setAttribute('role', 'status');
+    section.append(loading);
+    return section;
+  }
+
+  // ok·error 는 서버가 알려 준 연결 상태(mode)를 함께 보여 준다.
+  const modeLine = modeNote({ status, mode });
+  if (modeLine) section.append(modeLine);
+
+  if (status === 'error') {
+    const detail = error && typeof error === 'object' ? error : {};
+    const message = plainText(detail.message, '서버가 자세한 내용을 알려 주지 않았습니다.');
+    section.append(makeNode('p', `요청 실패: ${message}`, 'decision decision-failed'));
+    section.append(makeNode('p', '이 결과는 접근 거부 판정이 아닙니다. 접근이 허용된 것도 아닙니다. 필요하면 직접 다시 요청하세요.', 'muted'));
+    return section;
+  }
+
+  if (status !== 'ok' || !data || typeof data !== 'object') {
+    section.append(makeNode('p', `${DECISION_TEXT.unknown.label}(unknown)`, DECISION_TEXT.unknown.className));
+    section.append(makeNode('p', '판정 결과를 받지 못했거나 형식을 확인하지 못했습니다. 허용으로 간주하지 마세요.', 'muted'));
+    return section;
+  }
+
+  const received = typeof data.decision === 'string' ? data.decision : '';
+  const known = received !== '' && Object.hasOwn(DECISION_TEXT, received);
+  const code = known ? received : 'unknown';
+  const entry = DECISION_TEXT[code];
+  section.append(makeNode('p', `${entry.label}(${code})`, entry.className));
+  section.append(makeNode('p', entry.note));
+  if (!known && received && received !== 'unknown') {
+    section.append(makeNode('p', `받은 판정값: ${received} (목록에 없는 값이라 확인 불가로 처리했습니다)`, 'muted'));
+  }
+
+  const list = makeNode('dl', null, 'kv');
+  list.append(
+    makeNode('dt', '대상 앱'), makeNode('dd', plainText(data.appId, app || '확인 불가')),
+    makeNode('dt', '사유'), makeNode('dd', plainText(data.reason, '사유 정보 없음')),
+    makeNode('dt', '판정 시각'), makeNode('dd', decisionTime(data.checkedAt)),
+  );
+  section.append(list);
+  return section;
+}
+
 export function createStudentView() {
   return {
     renderIdentity({ me, devices, sessions } = {}) {
@@ -176,7 +267,11 @@ export function createStudentView() {
       root.append(identitySection(me), deviceSection(devices), sessionSection(sessions));
       return root;
     },
-    renderDecision() { return '학생 구현 대기: 서버의 판정과 이유를 연결하세요.'; },
+    renderDecision(input) {
+      const root = makeNode('div', null, 'student-decision');
+      root.append(decisionSection(input));
+      return root;
+    },
     renderEvents() { return '학생 구현 대기: 본인 접속·XDR 기록을 연결하세요.'; },
     renderStatus() { return '학생 구현 대기: 기기·세션·알림과 연결 점검 상태를 구분하세요.'; },
     renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
