@@ -260,6 +260,246 @@ function decisionSection(input) {
   return section;
 }
 
+// ---------- 15단계 보조 함수: 접속 기록·XDR 경보 목록과 상세 (renderEvents 전용) ----------
+// 앞 단계 보조 함수(makeNode, plainText, describeState, modeNote, decisionTime 등)는 바꾸지 않고 그대로 쓴다.
+// 필터·선택 상태는 renderEvents 가 호출될 때마다 새로 만든 화면 안에만 둔다(모듈에 저장하지 않는다).
+// 그래서 새 자료(다시 불러오기, 오류, 로딩)가 오면 이전 목록·필터·상세 선택이 남지 않는다.
+
+const KIND_TEXT = { access: '접속 기록', xdr: 'XDR 경보' };
+const ACCESS_TEXT = {
+  allowed: { label: '허용', note: '서버가 접근을 허용한 기록입니다.' },
+  denied: { label: '거부', note: '서버가 접근을 거부한 기록입니다.' },
+  unknown: { label: '확인 불가', note: '서버가 접속 상태를 확인하지 못했습니다. 허용으로 간주하지 마세요.' },
+};
+const ALL_VALUE = 'all';
+const NO_APP_VALUE = '__no_app__';
+
+function eventTime(value) {
+  if (typeof value !== 'string' || !value.trim()) return '시각 정보 없음';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return `시각 형식 오류(${value})`;
+  const kst = date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+  return `${kst} 한국 시각 (${value})`;
+}
+
+function eventTimeValue(value) {
+  const time = typeof value === 'string' ? new Date(value).getTime() : NaN;
+  return Number.isNaN(time) ? null : time;
+}
+
+function eventKindText(kind) {
+  const raw = typeof kind === 'string' && kind ? kind : 'unknown';
+  return Object.hasOwn(KIND_TEXT, raw) ? `${KIND_TEXT[raw]}(${raw})` : `확인 불가 종류(${raw})`;
+}
+
+function eventAppText(appId) {
+  return typeof appId === 'string' && appId.trim() ? appId : '앱 확인 불가(appId 없음)';
+}
+
+function eventAccess(event) {
+  const state = event.state && typeof event.state === 'object' ? event.state : {};
+  return typeof state.access === 'string' && state.access ? state.access : 'unknown';
+}
+
+// 받은 배열을 복사해 at 기준 최신순으로 정렬한다. 원본 배열과 항목은 바꾸지 않는다.
+function sortedEvents(data) {
+  return data
+    .filter((item) => item && typeof item === 'object')
+    .map((event, index) => ({ event, index, time: eventTimeValue(event.at) }))
+    .sort((a, b) => {
+      if (a.time === null && b.time === null) return a.index - b.index;
+      if (a.time === null) return 1;
+      if (b.time === null) return -1;
+      return b.time - a.time || a.index - b.index;
+    })
+    .map((entry) => entry.event);
+}
+
+function filterField(labelText, options, onPick) {
+  const label = makeNode('label', `${labelText} `);
+  const select = makeNode('select');
+  select.setAttribute('aria-label', labelText);
+  for (const [value, text] of options) {
+    const option = makeNode('option', text);
+    option.value = value;
+    select.append(option);
+  }
+  select.value = ALL_VALUE;
+  select.addEventListener('change', () => onPick(select.value));
+  label.append(select);
+  return label;
+}
+
+function detailBlock(title, items, emptyText) {
+  const block = makeNode('div');
+  block.append(makeNode('h5', title));
+  if (!Array.isArray(items) || items.length === 0) {
+    block.append(makeNode('p', emptyText, 'state state-empty'));
+    return block;
+  }
+  const list = makeNode('ul', null, 'plain-list');
+  for (const item of items) {
+    const entry = item && typeof item === 'object' ? item : {};
+    const row = makeNode('li');
+    row.append(makeNode('span', `ID ${plainText(entry.id)}`, 'item-title'));
+    row.append(makeNode('span', ` · ${plainText(entry.text, '내용 없음')}`));
+    list.append(row);
+  }
+  block.append(list);
+  return block;
+}
+
+function detailState(label, table, value) {
+  const state = describeState(table, value);
+  const row = makeNode('li');
+  row.append(makeNode('span', `${label}: `, 'item-title'));
+  row.append(makeNode('span', state.text, state.normal ? 'muted' : 'state state-empty'));
+  if (state.note) row.append(makeNode('span', ` ${state.note}`, 'muted'));
+  return row;
+}
+
+function eventDetail(event) {
+  const detail = makeNode('section', null, 'event-detail');
+  detail.setAttribute('data-student-event-detail', String(event.id));
+  detail.append(makeNode('h4', `${plainText(event.id)} 상세`));
+  const facts = makeNode('dl', null, 'kv');
+  facts.append(
+    makeNode('dt', '사건 ID'), makeNode('dd', plainText(event.id)),
+    makeNode('dt', '종류'), makeNode('dd', eventKindText(event.kind)),
+    makeNode('dt', '업무 앱(appId)'), makeNode('dd', eventAppText(event.appId)),
+    makeNode('dt', '시각'), makeNode('dd', eventTime(event.at)),
+    makeNode('dt', '요약'), makeNode('dd', plainText(event.summary, '요약 없음')),
+  );
+  detail.append(facts);
+  detail.append(detailBlock('근거(evidence)', event.evidence, '근거 정보가 없습니다.'));
+  detail.append(detailBlock('규칙(rules)', event.rules, '적용된 규칙 정보가 없습니다.'));
+  const state = event.state && typeof event.state === 'object' ? event.state : {};
+  const states = makeNode('div');
+  states.append(makeNode('h5', '상태(state)'));
+  const list = makeNode('ul', null, 'plain-list');
+  list.append(
+    detailState('접속 상태(access)', ACCESS_TEXT, state.access),
+    detailState('세션(session)', SESSION_TEXT, state.session),
+    detailState('기기(device)', DEVICE_TEXT, state.device),
+  );
+  states.append(list);
+  detail.append(states);
+  return detail;
+}
+
+function eventsSection(resource) {
+  const section = makeNode('section');
+  section.append(makeNode('h3', '내 접속 기록·XDR 경보'));
+  const mode = modeNote(resource);
+  if (mode) section.append(mode);
+
+  if (!resource || typeof resource !== 'object') {
+    section.append(makeNode('p', '기록 확인 불가: 자료를 받지 못했습니다.', 'state state-error'));
+    return section;
+  }
+  if (resource.status === 'loading') {
+    const loading = makeNode('p', '기록을 불러오는 중…', 'state state-loading');
+    loading.setAttribute('role', 'status');
+    section.append(loading);
+    return section;
+  }
+  if (resource.status === 'error') {
+    const error = resource.error && typeof resource.error === 'object' ? resource.error : {};
+    const message = plainText(error.message, '서버가 자세한 내용을 알려 주지 않았습니다.');
+    if (error.code === 'CONTRACT_MISMATCH') {
+      section.append(makeNode('p', `기록 확인 불가: 서버 응답이 약속된 형식과 다릅니다. ${message}`, 'state state-error'));
+      section.append(makeNode('p', '이전 목록은 지웠습니다. 기록이 없다는 뜻이 아닙니다.', 'muted'));
+    } else {
+      section.append(makeNode('p', `기록을 불러오지 못했습니다: ${message}`, 'state state-error'));
+      section.append(makeNode('p', '이전 목록은 표시하지 않습니다. 기록이 없다는 뜻이 아닙니다.', 'muted'));
+    }
+    return section;
+  }
+  if (resource.status !== 'ok') {
+    section.append(makeNode('p', '기록 확인 불가: 알 수 없는 상태입니다.', 'state state-error'));
+    return section;
+  }
+  if (!Array.isArray(resource.data)) {
+    section.append(makeNode('p', '기록 확인 불가: 응답 형식이 배열이 아닙니다.', 'state state-error'));
+    return section;
+  }
+
+  const all = sortedEvents(resource.data);
+  if (all.length === 0) {
+    section.append(makeNode('p', '표시할 기록이 없습니다.', 'state state-empty'));
+    section.append(makeNode('p', '본인의 최근 기록만 조회합니다. 전체 직원의 로그가 아닙니다.', 'muted'));
+    return section;
+  }
+
+  const filters = { kind: ALL_VALUE, app: ALL_VALUE, access: ALL_VALUE };
+  let selectedId = null;
+
+  const unique = (values) => [...new Set(values)];
+  const kindOptions = [[ALL_VALUE, '전체'], ...unique(['access', 'xdr', ...all.map((e) => (typeof e.kind === 'string' ? e.kind : ''))].filter(Boolean)).map((k) => [k, eventKindText(k)])];
+  const appIds = unique(all.map((e) => e.appId).filter((id) => typeof id === 'string' && id.trim()));
+  const appOptions = [[ALL_VALUE, '전체'], ...appIds.map((id) => [id, id])];
+  if (all.some((e) => !(typeof e.appId === 'string' && e.appId.trim()))) appOptions.push([NO_APP_VALUE, '앱 확인 불가(appId 없음)']);
+  const accessOptions = [[ALL_VALUE, '전체'], ...unique(['allowed', 'denied', 'unknown', ...all.map(eventAccess)]).map((a) => [a, describeState(ACCESS_TEXT, a).text])];
+
+  const controls = makeNode('div', null, 'filters');
+  const summary = makeNode('p', null, 'muted');
+  summary.setAttribute('role', 'status');
+  const listHost = makeNode('div');
+  const detailHost = makeNode('div');
+
+  const matches = (event) => {
+    if (filters.kind !== ALL_VALUE && event.kind !== filters.kind) return false;
+    if (filters.app !== ALL_VALUE) {
+      const hasApp = typeof event.appId === 'string' && event.appId.trim();
+      if (filters.app === NO_APP_VALUE ? hasApp : event.appId !== filters.app) return false;
+    }
+    if (filters.access !== ALL_VALUE && eventAccess(event) !== filters.access) return false;
+    return true;
+  };
+
+  const redraw = () => {
+    const shown = all.filter(matches);
+    if (selectedId !== null && !shown.some((e) => e.id === selectedId)) selectedId = null;
+    summary.textContent = `표시 ${shown.length}건 / 받은 기록 ${all.length}건 (본인의 최근 기록만, 전체 로그 아님)`;
+
+    if (shown.length === 0) {
+      listHost.replaceChildren(makeNode('p', '선택한 필터에 맞는 기록이 없습니다. 필터를 전체로 바꿔 보세요.', 'state state-empty'));
+    } else {
+      const list = makeNode('ul', null, 'plain-list');
+      for (const event of shown) {
+        const row = makeNode('li');
+        row.setAttribute('data-student-event-id', String(event.id));
+        row.append(makeNode('span', `${plainText(event.id)} `, 'item-title'));
+        row.append(makeNode('span', `${eventTime(event.at)} · ${eventKindText(event.kind)} · 앱: ${eventAppText(event.appId)} · `));
+        row.append(makeNode('span', plainText(event.summary, '요약 없음')));
+        row.append(makeNode('span', ' '));
+        const button = makeNode('button', `${plainText(event.id)} 상세`);
+        button.type = 'button';
+        button.setAttribute('aria-expanded', String(event.id === selectedId));
+        button.addEventListener('click', () => {
+          selectedId = event.id;
+          redraw();
+        });
+        row.append(button);
+        list.append(row);
+      }
+      listHost.replaceChildren(list);
+    }
+
+    const selected = selectedId === null ? null : shown.find((e) => e.id === selectedId);
+    detailHost.replaceChildren(selected ? eventDetail(selected) : makeNode('p', '기록의 「상세」 버튼을 누르면 근거·규칙·상태가 표시됩니다.', 'muted'));
+  };
+
+  controls.append(
+    filterField('기록 종류', kindOptions, (value) => { filters.kind = value; redraw(); }),
+    filterField('업무 앱', appOptions, (value) => { filters.app = value; redraw(); }),
+    filterField('접속 상태', accessOptions, (value) => { filters.access = value; redraw(); }),
+  );
+  section.append(controls, summary, listHost, detailHost);
+  redraw();
+  return section;
+}
+
 export function createStudentView() {
   return {
     renderIdentity({ me, devices, sessions } = {}) {
@@ -272,7 +512,11 @@ export function createStudentView() {
       root.append(decisionSection(input));
       return root;
     },
-    renderEvents() { return '학생 구현 대기: 본인 접속·XDR 기록을 연결하세요.'; },
+    renderEvents(input) {
+      const root = makeNode('div', null, 'student-events');
+      root.append(eventsSection(input));
+      return root;
+    },
     renderStatus() { return '학생 구현 대기: 기기·세션·알림과 연결 점검 상태를 구분하세요.'; },
     renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
     renderAiConnection() { return '학생 구현 대기: 모델 응답 점검과 실제 사건 설명을 구분하고 AI 오류·취소·수동 복구를 안내하세요.'; },
