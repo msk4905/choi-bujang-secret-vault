@@ -384,6 +384,23 @@ function eventDetail(event) {
   );
   states.append(list);
   detail.append(states);
+  // 16단계: 서버가 넘겨 준 조치가 있을 때만 안내한다. 비활성 버튼이며 어떤 요청도 보내지 않는다.
+  const actions = Array.isArray(event.supportedActions)
+    ? event.supportedActions.filter((action) => typeof action === 'string' && action.trim())
+    : [];
+  if (actions.length > 0) {
+    const block = makeNode('div');
+    block.append(makeNode('h5', '조치(supportedActions)'));
+    block.append(makeNode('p', '조치 실행 연결은 준비 중입니다. 아래 조치는 아직 지원하지 않으며, 이 화면은 어떤 조치 요청도 보내지 않습니다.', 'state state-empty'));
+    for (const action of actions) {
+      const button = makeNode('button', `${action} 미지원`);
+      button.type = 'button';
+      button.disabled = true;
+      button.setAttribute('aria-disabled', 'true');
+      block.append(button);
+    }
+    detail.append(block);
+  }
   return detail;
 }
 
@@ -500,6 +517,213 @@ function eventsSection(resource) {
   return section;
 }
 
+// ---------- 16단계 보조 함수: 기기·세션·알림·도움정보 (renderStatus 전용) ----------
+// 앞 단계 보조 함수(makeNode, plainText, stateBadge, modeNote 등)는 바꾸지 않고 그대로 쓴다.
+// 이 화면은 서버를 직접 부르지 않고 자동으로 다시 요청하지도 않는다. 다시 시도는 사용자가 위쪽
+// 「다시 불러오기」 버튼을 직접 누르는 것이다. 이전 실패·성공 값을 모듈에 저장하지 않으므로
+// 새 입력이 오면 이전 실패 안내는 남지 않는다.
+
+const RETRY_GUIDE = '다시 시도는 위쪽 다시 불러오기 버튼을 직접 누르세요. 이 화면은 자동으로 다시 요청하지 않습니다.';
+const TIMEOUT_CODES = ['TIMEOUT', 'REQUEST_TIMEOUT', 'ENGINE_TIMEOUT'];
+const RESOURCE_TEXT = {
+  me: '로그인 정보', devices: '기기 목록', sessions: '세션', events: '접속·XDR 기록', diagnostics: '도움정보', apps: '업무 앱',
+};
+const SECRET_LIKE = /(api[_-]?key|token|secret|passw(or)?d|bearer|authorization|sk-[A-Za-z0-9])/i;
+
+function resourceName(resource) {
+  const key = typeof resource === 'string' ? resource : '';
+  return Object.hasOwn(RESOURCE_TEXT, key) ? `${RESOURCE_TEXT[key]}(${key})` : `확인 불가 자료(${key || 'resource 없음'})`;
+}
+
+// 서버가 준 값 중 화면에 쓸 수 있는 짧은 글자만 남긴다. 비밀로 보이는 글자는 쓰지 않는다.
+function safeValue(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value !== 'string' || !value.trim()) return '확인 불가';
+  if (SECRET_LIKE.test(value)) return '[민감 정보로 보여 표시하지 않음]';
+  return value.length > 120 ? `${value.slice(0, 120)}…` : value;
+}
+
+function safeCode(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(value) ? value : '확인 불가';
+}
+
+function failureLines(resource, label) {
+  const error = resource.error && typeof resource.error === 'object' ? resource.error : {};
+  const message = plainText(error.message, '서버가 자세한 내용을 알려 주지 않았습니다.');
+  const code = safeCode(error.code);
+  const lines = [];
+  if (TIMEOUT_CODES.includes(error.code)) {
+    lines.push(makeNode('p', `${label}: 시간 초과로 불러오지 못했습니다(${code}): ${message}`, 'state state-error'));
+  } else if (error.code === 'CONTRACT_MISMATCH' || error.code === 'ENGINE_RESULT_UNVERIFIED') {
+    lines.push(makeNode('p', `${label}: 확인 불가(${code}): ${message}`, 'state state-error'));
+  } else {
+    lines.push(makeNode('p', `${label}: 불러오지 못했습니다(${code}): ${message}`, 'state state-error'));
+  }
+  lines.push(makeNode('p', `연결 상태를 확인한 뒤 다시 시도하세요. ${RETRY_GUIDE}`, 'muted'));
+  return lines;
+}
+
+function statusResourceBlock(resource, cfg) {
+  const block = makeNode('div');
+  block.append(makeNode('h4', cfg.title));
+  if (!resource || typeof resource !== 'object') {
+    block.append(makeNode('p', `${cfg.title}: 확인 불가 (자료를 받지 못했습니다)`, 'state state-error'));
+    return block;
+  }
+  if (resource.status === 'loading') {
+    const loading = makeNode('p', `${cfg.title}: 불러오는 중…`, 'state state-loading');
+    loading.setAttribute('role', 'status');
+    block.append(loading);
+    return block;
+  }
+  if (resource.status === 'error') {
+    block.append(...failureLines(resource, cfg.title));
+    return block;
+  }
+  if (resource.status !== 'ok') {
+    block.append(makeNode('p', `${cfg.title}: 확인 불가 (알 수 없는 상태)`, 'state state-error'));
+    return block;
+  }
+  if (!Array.isArray(resource.data)) {
+    block.append(makeNode('p', `${cfg.title}: 확인 불가 (응답 형식 불일치)`, 'state state-error'));
+    return block;
+  }
+  if (resource.data.length === 0) {
+    block.append(makeNode('p', cfg.empty, 'state state-empty'));
+  } else {
+    const list = makeNode('ul', null, 'plain-list');
+    for (const item of resource.data) {
+      const row = makeNode('li');
+      cfg.describe(row, item && typeof item === 'object' ? item : {});
+      list.append(row);
+    }
+    block.append(list);
+  }
+  if (cfg.scope) block.append(makeNode('p', cfg.scope, 'muted'));
+  return block;
+}
+
+function notificationBlock(notifications) {
+  const block = makeNode('div');
+  block.append(makeNode('h4', '알림'));
+  if (!Array.isArray(notifications)) {
+    block.append(makeNode('p', '알림: 확인 불가 (자료를 받지 못했습니다)', 'state state-error'));
+    return block;
+  }
+  if (notifications.length === 0) {
+    block.append(makeNode('p', '주의할 알림이 없습니다.', 'state state-empty'));
+    return block;
+  }
+  const list = makeNode('ul', null, 'plain-list');
+  for (const item of notifications) {
+    const note = item && typeof item === 'object' ? item : {};
+    const row = makeNode('li');
+    const code = safeCode(note.code);
+    const failed = /^[A-Z][A-Z0-9_]+$/.test(code);
+    row.append(makeNode('span', `자료: ${resourceName(note.resource)}`, 'item-title'));
+    row.append(makeNode('span', ` · 코드: ${code}`, 'muted'));
+    row.append(makeNode('span', ` · ${plainText(note.message, '내용 없음')}`));
+    if (failed) {
+      row.append(makeNode('span', ` ${TIMEOUT_CODES.includes(code) ? '시간 초과입니다. ' : ''}연결 상태를 확인한 뒤 위쪽 다시 불러오기 버튼을 직접 누르세요.`, 'muted'));
+    }
+    list.append(row);
+  }
+  block.append(list);
+  return block;
+}
+
+// 도움 요청에 쓰는 안전한 값만 고른다. 원본 diagnostics 를 통째로 복사하거나 표시하지 않는다.
+function diagnosticsFields(data) {
+  const source = data && typeof data === 'object' ? data : {};
+  const engine = source.engine && typeof source.engine === 'object' ? source.engine : {};
+  return [
+    ['requestId', safeValue(source.requestId)],
+    ['component', safeValue(source.component)],
+    ['version', safeValue(source.version)],
+    ['checkedAt', safeValue(source.checkedAt)],
+    ['engine.mode', safeValue(engine.mode)],
+    ['engine.code', safeValue(engine.code)],
+  ];
+}
+
+function diagnosticsBlock(diagnostics) {
+  const block = makeNode('div');
+  block.append(makeNode('h4', '도움정보'));
+  const copyButton = makeNode('button', '도움정보 복사');
+  copyButton.type = 'button';
+  const result = makeNode('p', null, 'muted');
+  result.setAttribute('role', 'status');
+
+  const d = diagnostics && typeof diagnostics === 'object' ? diagnostics : null;
+  if (!d || d.status === 'idle') {
+    block.append(makeNode('p', '도움정보를 아직 불러오지 않았습니다. 필요하면 위쪽 도움정보 영역에서 직접 불러오세요.', 'state state-empty'));
+  } else if (d.status === 'loading') {
+    const loading = makeNode('p', '도움정보를 불러오는 중…', 'state state-loading');
+    loading.setAttribute('role', 'status');
+    block.append(loading);
+  } else if (d.status === 'error') {
+    block.append(...failureLines(d, '도움정보'));
+  } else if (d.status !== 'ok' || !d.data || typeof d.data !== 'object') {
+    block.append(makeNode('p', '도움정보: 확인 불가 (응답 형식 불일치)', 'state state-error'));
+  } else {
+    const fields = diagnosticsFields(d.data);
+    const list = makeNode('dl', null, 'kv');
+    for (const [name, value] of fields) list.append(makeNode('dt', name), makeNode('dd', value));
+    block.append(list);
+    const text = fields.map(([name, value]) => `${name}: ${value}`).join('\n');
+    copyButton.addEventListener('click', async () => {
+      try {
+        if (typeof navigator === 'undefined' || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') throw new Error('clipboard unavailable');
+        await navigator.clipboard.writeText(text);
+        result.textContent = '도움정보를 클립보드에 복사했습니다. 어디에도 자동으로 전송되지 않았습니다.';
+      } catch {
+        result.textContent = '복사하지 못했습니다. 위에 표시된 값을 직접 선택해 복사하세요.';
+      }
+    });
+    block.append(makeNode('p', '도움 요청에 쓰도록 복사하는 정보입니다. 비밀번호·토큰·API 키는 포함하지 않으며, 「도움정보 복사」 버튼을 누를 때만 복사됩니다.', 'muted'));
+  }
+  if (!d || d.status !== 'ok' || !d.data || typeof d.data !== 'object') {
+    copyButton.disabled = true;
+    copyButton.setAttribute('aria-disabled', 'true');
+    block.append(makeNode('p', '도움정보를 불러온 뒤에만 복사할 수 있습니다.', 'muted'));
+  }
+  block.append(copyButton, result);
+  return block;
+}
+
+function statusSection(input) {
+  const { devices, sessions, notifications, diagnostics, mode } = input && typeof input === 'object' ? input : {};
+  const section = makeNode('section');
+  section.append(makeNode('h3', '기기·세션·알림·도움정보'));
+  const modeLine = modeNote({ status: 'ok', mode });
+  if (modeLine) section.append(modeLine);
+  section.append(
+    statusResourceBlock(devices, {
+      title: '기기 목록',
+      empty: '등록된 기기가 없습니다.',
+      scope: '내 이름으로 등록되고 회수되지 않은 기기만 최대 100개까지 표시합니다.',
+      describe(row, device) {
+        row.append(makeNode('span', plainText(device.label, plainText(device.id)), 'item-title'));
+        if (typeof device.id === 'string' && device.id) row.append(makeNode('span', ` (${device.id}) `, 'muted'));
+        row.append(stateBadge(DEVICE_TEXT, device.status));
+      },
+    }),
+    statusResourceBlock(sessions, {
+      title: '세션',
+      empty: '현재 연결(세션)이 없습니다.',
+      scope: '지금 검증된 연결 한 개만 표시합니다. 지난 세션 목록이 아닙니다.',
+      describe(row, session) {
+        row.append(makeNode('span', plainText(session.id), 'item-title'));
+        row.append(makeNode('span', ' '));
+        row.append(stateBadge(SESSION_TEXT, session.status));
+      },
+    }),
+    notificationBlock(notifications),
+    diagnosticsBlock(diagnostics),
+  );
+  return section;
+}
+
 export function createStudentView() {
   return {
     renderIdentity({ me, devices, sessions } = {}) {
@@ -517,7 +741,11 @@ export function createStudentView() {
       root.append(eventsSection(input));
       return root;
     },
-    renderStatus() { return '학생 구현 대기: 기기·세션·알림과 연결 점검 상태를 구분하세요.'; },
+    renderStatus(input) {
+      const root = makeNode('div', null, 'student-status');
+      root.append(statusSection(input));
+      return root;
+    },
     renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
     renderAiConnection() { return '학생 구현 대기: 모델 응답 점검과 실제 사건 설명을 구분하고 AI 오류·취소·수동 복구를 안내하세요.'; },
     renderExplanation() { return '학생 구현 대기: 선택한 사건의 근거·규칙·현재 상태와 AI 설명을 연결하세요. 제안은 자동 실행하지 않습니다.'; },
