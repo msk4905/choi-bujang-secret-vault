@@ -768,12 +768,17 @@ const AI_ERROR_GROUP_BY_CODE = {
   MODEL_NOT_CONFIGURED: 'nomodel',
 };
 
+function aiSafeMessage(value) {
+  const message = plainText(value, '서버가 자세한 내용을 알려 주지 않았습니다.');
+  return SECRET_LIKE.test(message) ? '[민감 정보로 보여 표시하지 않음]' : message;
+}
+
 function aiErrorLines(error, title) {
   const detail = error && typeof error === 'object' ? error : {};
   const code = safeCode(detail.code);
   const groupKey = Object.hasOwn(AI_ERROR_GROUP_BY_CODE, detail.code) ? AI_ERROR_GROUP_BY_CODE[detail.code] : 'unverified';
   const group = AI_ERROR_GROUPS[groupKey];
-  const message = plainText(detail.message, '서버가 자세한 내용을 알려 주지 않았습니다.');
+  const message = aiSafeMessage(detail.message);
   return [
     makeNode('p', `${title}: ${group.label}`, 'state state-error'),
     makeNode('p', `오류 코드: ${code} · ${message}`),
@@ -799,8 +804,6 @@ function aiConnectionSection(input) {
     return section;
   }
   if (status === 'error') {
-    const modeLine = modeNote({ status, mode });
-    if (modeLine) section.append(modeLine);
     section.append(...aiErrorLines(error, 'AI 연결 점검 실패'));
     section.append(makeNode('p', '이 결과는 사건 설명이 아니라 연결 점검 결과입니다. 이전 성공 결과는 표시하지 않습니다.', 'muted'));
     section.append(makeNode('p', AI_RETRY_GUIDE, 'muted'), makeNode('p', AI_ROLE_NOTE, 'muted'));
@@ -840,47 +843,179 @@ function aiConnectionSection(input) {
   return section;
 }
 
+// ---------- 18단계 보조 함수: 근거에 연결된 AI 사건 설명 (renderExplanation 전용) ----------
+// 설명이 쓸 수 있는지는 제공 코드의 검사에 더해, 현재 선택한 기록(event)의 근거 ID 와 다시 대조해 정한다.
+// 맞지 않으면 내용을 지어내지 않고 쓸 수 없다고만 보여 준다. 성공 표식은 쓸 수 있는 설명에만 붙인다.
+
+const EXPLANATION_FAILURE_REASON = {
+  ON_AI_INVALID_INPUT: '근거 부족: 이 기록의 근거·규칙을 확인할 수 없어 설명을 만들지 못했습니다.',
+  ON_AI_INVALID_OUTPUT: '근거 불일치: AI 응답의 근거·조치·형식이 이 기록과 맞지 않아 쓸 수 없습니다. 이미 실행했다고 답한 설명도 쓰지 않습니다.',
+  SUBJECT_SCOPE_UNVERIFIED: '확인 불가: 현재 로그인과 이 기록의 연결을 확인할 수 없습니다.',
+};
+// 설명 요청 실패에서는 「점검」이 아니라 「설명 요청」을 다시 누르라고 안내한다.
+const EXPLANATION_FAILURE_GUIDE = {
+  transient: '잠시 뒤 보안 기록에서 「AI 설명 요청」을 직접 다시 누르세요.',
+  cancelled: 'AI 설명 요청을 취소했습니다. 이전 응답은 현재 결과가 아닙니다.',
+};
+const EXPLANATION_STATE_FIELDS = [
+  ['access', '접속', ACCESS_TEXT],
+  ['session', '세션', SESSION_TEXT],
+  ['device', '기기', DEVICE_TEXT],
+];
+
+function explanationHeader() {
+  return makeNode('h3', 'AI 설명(참고용)');
+}
+
+function listOrNone(items, text) {
+  if (items.length === 0) return makeNode('p', text, 'muted');
+  const list = makeNode('ul', null, 'plain-list');
+  for (const item of items) list.append(item);
+  return list;
+}
+
+// 설명을 현재 기록에 맞춰 검사한다. 쓸 수 없으면 까닭 한 줄을, 쓸 수 있으면 화면에 쓸 값을 돌려준다.
+function checkExplanation(event, data) {
+  const record = data && typeof data === 'object' ? data : null;
+  if (!record || typeof record.summary !== 'string' || !record.summary.trim()) {
+    return { reason: '설명 요약이 없어 쓸 수 없습니다(근거가 맞지 않음).' };
+  }
+  if (record.executed !== false) return { reason: '이미 실행했다고 답한 설명은 쓸 수 없습니다.' };
+  if (record.requiresHumanConfirmation !== true) return { reason: '사람 확인이 필요하다는 표시가 없는 설명은 쓸 수 없습니다.' };
+  const evidence = Array.isArray(event.evidence) ? event.evidence.filter((row) => row && typeof row === 'object' && typeof row.id === 'string') : [];
+  if (evidence.length === 0) return { reason: '근거 부족: 이 기록에 근거가 없어 AI 설명을 쓸 수 없습니다.' };
+  const ids = Array.isArray(record.evidenceIds) ? record.evidenceIds : [];
+  if (ids.length === 0) return { reason: '근거 부족: AI 설명이 인용한 근거 ID가 없어 쓸 수 없습니다.' };
+  const byId = new Map(evidence.map((row) => [row.id, row]));
+  const cited = [];
+  for (const id of ids) {
+    if (typeof id !== 'string' || !byId.has(id)) {
+      return { reason: `근거가 맞지 않음: 인용한 근거 ID(${safeCode(id)})가 이 기록(${event.id})의 근거에 없어 이 설명을 쓸 수 없습니다.` };
+    }
+    cited.push(byId.get(id));
+  }
+  const proposals = Array.isArray(record.proposals) ? record.proposals : [];
+  const supported = Array.isArray(event.supportedActions) ? event.supportedActions : [];
+  for (const proposal of proposals) {
+    const row = proposal && typeof proposal === 'object' ? proposal : {};
+    const proofs = Array.isArray(row.evidenceIds) ? row.evidenceIds : [];
+    if (typeof row.action !== 'string' || !supported.includes(row.action) || proofs.length === 0 || !proofs.every((id) => byId.has(id))) {
+      return { reason: '근거가 맞지 않음: 제안한 조치나 그 근거가 이 기록과 맞지 않아 이 설명을 쓸 수 없습니다.' };
+    }
+  }
+  return { summary: record.summary, cited, proposals, supported };
+}
+
+function stateNodes(event) {
+  const state = event.state && typeof event.state === 'object' ? event.state : {};
+  const unknownRows = [];
+  const currentRows = [];
+  for (const [key, label, table] of EXPLANATION_STATE_FIELDS) {
+    const raw = typeof state[key] === 'string' && state[key] ? state[key] : 'unknown';
+    const known = Object.hasOwn(table, raw) && raw !== 'unknown';
+    const described = describeState(table, raw);
+    if (known) {
+      currentRows.push(makeNode('li', `${label}: ${described.text}${described.note ? ` — ${described.note}` : ''}`));
+    } else {
+      unknownRows.push(makeNode('li', `${label}: 확인 불가(${raw})`, 'state state-empty'));
+    }
+  }
+  return { unknownRows, currentRows };
+}
+
+function proposalNodes(result) {
+  if (result.proposals.length === 0) {
+    return [makeNode('p', result.supported.length === 0
+      ? '연동 시스템이 지원하는 조치가 없어 제안이 없습니다(정상).'
+      : 'AI가 제안한 조치가 없습니다.', 'muted')];
+  }
+  const rows = result.proposals.map((proposal) => {
+    const row = makeNode('li');
+    row.append(makeNode('span', `조치: ${plainText(proposal.action)}`, 'item-title'));
+    row.append(makeNode('span', ` · 이유: ${plainText(proposal.reason, '이유 없음')}`));
+    row.append(makeNode('span', ` · 근거 ID: ${proposal.evidenceIds.map((id) => safeCode(id)).join(', ')}`, 'muted'));
+    row.append(makeNode('span', ' · 사람 확인이 필요하며 실행되지 않았습니다.', 'muted'));
+    return row;
+  });
+  return [listOrNone(rows, '')];
+}
+
 function explanationSection(input) {
   const source = input && typeof input === 'object' ? input : {};
   const { event, explanation, checkedAt } = source;
-  const eventId = event && typeof event === 'object' && typeof event.id === 'string' && event.id ? event.id : '';
-  const wrapper = makeNode('div');
-  wrapper.append(makeNode('h3', '사건 설명(AI)'));
   const exp = explanation && typeof explanation === 'object' ? explanation : {};
+  const record = event && typeof event === 'object' ? event : null;
+  const eventId = record && typeof record.id === 'string' && record.id ? record.id : '';
+  const wrapper = makeNode('div');
+  wrapper.append(explanationHeader());
 
+  // 1) 실패: event 가 null 이어도 안전한 오류 코드와 까닭을 먼저 보여 준다.
+  if (exp.status === 'error') {
+    const detail = exp.error && typeof exp.error === 'object' ? exp.error : {};
+    const groupKey = Object.hasOwn(AI_ERROR_GROUP_BY_CODE, detail.code) ? AI_ERROR_GROUP_BY_CODE[detail.code] : 'unverified';
+    wrapper.append(makeNode('p', `AI 설명 실패: ${AI_ERROR_GROUPS[groupKey].label}`, 'state state-error'));
+    wrapper.append(makeNode('p', `오류 코드: ${safeCode(detail.code)} · ${aiSafeMessage(detail.message)}`));
+    if (Object.hasOwn(EXPLANATION_FAILURE_REASON, detail.code)) wrapper.append(makeNode('p', EXPLANATION_FAILURE_REASON[detail.code], 'state state-empty'));
+    wrapper.append(makeNode('p', EXPLANATION_FAILURE_GUIDE[groupKey] || AI_ERROR_GROUPS[groupKey].guide, 'muted'));
+    wrapper.append(makeNode('p', '기록은 그대로입니다. 업무 앱 판정과 보안 기록은 계속 동작하며, 이 실패는 과제 실패가 아닙니다.', 'muted'));
+    return wrapper;
+  }
+  // 2) 오류 없이 기록만 없는 경우
+  if (!record) {
+    wrapper.append(makeNode('p', '보안 기록에서 기록을 먼저 고르세요', 'state state-empty'));
+    wrapper.append(makeNode('p', '기록을 고르고 「AI 설명 요청」을 누르면 이 칸에 설명이 표시됩니다. 연결 점검만으로는 사건 설명이 만들어지지 않습니다.', 'muted'));
+    return wrapper;
+  }
+  // 3) 요청 중
   if (exp.status === 'loading') {
     const loading = makeNode('p', `${eventId ? `${eventId}: ` : ''}AI 설명을 요청하는 중…`, 'state state-loading');
     loading.setAttribute('role', 'status');
-    wrapper.append(loading);
+    wrapper.append(loading, makeNode('p', '이전 설명은 현재 기록의 설명이 아니므로 표시하지 않습니다.', 'muted'));
     return wrapper;
   }
-  if (exp.status === 'error') {
-    // 실패 화면에는 data-student-explanation-event 를 붙이지 않는다.
-    const detail = exp.error && typeof exp.error === 'object' ? exp.error : {};
-    wrapper.append(makeNode('p', 'AI 설명 실패', 'state state-error'));
-    wrapper.append(makeNode('p', `오류 코드: ${safeCode(detail.code)} · ${plainText(detail.message, '서버가 자세한 내용을 알려 주지 않았습니다.')}`));
-    wrapper.append(makeNode('p', '기록은 그대로 유지됩니다. 연결 점검 결과와 사건 설명은 별개이며, 이 실패를 연결 성공으로 읽지 마세요.', 'muted'));
-    return wrapper;
-  }
-  const summary = exp.data && typeof exp.data === 'object' ? exp.data.summary : null;
-  if (exp.status === 'ok' && eventId && typeof summary === 'string' && summary.trim()) {
+  // 4) 성공: 현재 기록의 근거와 대조해 쓸 수 있을 때만
+  if (exp.status === 'ok') {
+    const result = eventId ? checkExplanation(record, exp.data) : { reason: '사건 ID를 확인할 수 없어 쓸 수 없습니다.' };
+    if (result.reason) {
+      wrapper.append(makeNode('p', 'AI 설명을 쓸 수 없습니다', 'state state-error'));
+      wrapper.append(makeNode('p', result.reason));
+      wrapper.append(makeNode('p', '내용을 지어내지 않고 표시하지 않았습니다. 기록은 그대로입니다. 필요하면 「AI 설명 요청」을 직접 다시 누르세요.', 'muted'));
+      return wrapper;
+    }
     wrapper.setAttribute('data-student-explanation-event', eventId);
-    const list = makeNode('dl', null, 'kv');
-    list.append(
+    const facts = makeNode('dl', null, 'kv');
+    facts.append(
       makeNode('dt', '사건 ID'), makeNode('dd', eventId),
-      makeNode('dt', '설명 요약'), makeNode('dd', summary),
+      makeNode('dt', 'AI 요약(참고용)'), makeNode('dd', result.summary),
       makeNode('dt', '확인 시각'), makeNode('dd', aiCheckedAt(checkedAt)),
     );
-    wrapper.append(list);
-    wrapper.append(makeNode('p', '이 설명은 조치를 실행하지 않았습니다. 조치는 사람이 확인한 뒤 따로 요청해야 합니다.', 'muted'));
+    wrapper.append(facts);
+    wrapper.append(makeNode('p', 'AI 설명은 해석입니다. 사실 판단은 아래 근거 글과 연동 시스템이 알려 준 상태로 하세요.', 'muted'));
+
+    wrapper.append(makeNode('h4', '인용한 근거'));
+    wrapper.append(listOrNone(result.cited.map((row) => makeNode('li', `${row.id} — ${plainText(row.text, '근거 글 없음')}`)), '근거 없음'));
+
+    wrapper.append(makeNode('h4', '적용된 규칙'));
+    const rules = Array.isArray(record.rules) ? record.rules.filter((row) => row && typeof row === 'object') : [];
+    wrapper.append(listOrNone(rules.map((row) => makeNode('li', `${plainText(row.id)} — ${plainText(row.text, '규칙 글 없음')}`)), '규칙 없음'));
+
+    const { unknownRows, currentRows } = stateNodes(record);
+    wrapper.append(makeNode('h4', '확인 불가 상태'));
+    wrapper.append(listOrNone(unknownRows, '없음'));
+    if (unknownRows.length > 0) wrapper.append(makeNode('p', '확인할 수 없는 상태는 정상이나 안전으로 간주하지 마세요.', 'muted'));
+    if (currentRows.length > 0) {
+      wrapper.append(makeNode('h4', '연동 시스템이 알려 준 상태'));
+      wrapper.append(listOrNone(currentRows, ''));
+    }
+
+    wrapper.append(makeNode('h4', '제안'));
+    wrapper.append(...proposalNodes(result));
+    wrapper.append(makeNode('p', '이 설명과 제안만으로 보안 조치가 실행되지는 않습니다. 실행 버튼도 만들지 않았습니다.', 'muted'));
     return wrapper;
   }
-  if (exp.status === 'ok') {
-    wrapper.append(makeNode('p', 'AI 설명: 확인 불가 (사건 ID 또는 설명 요약을 확인할 수 없습니다)', 'state state-error'));
-    return wrapper;
-  }
-  wrapper.append(makeNode('p', 'AI 설명 전', 'state state-empty'));
-  wrapper.append(makeNode('p', '보안 기록에서 「AI 설명 요청」을 누르면 이 칸에 결과가 표시됩니다. 연결 점검만으로는 사건 설명이 만들어지지 않습니다.', 'muted'));
+  // 5) 아직 요청하지 않음
+  wrapper.append(makeNode('p', `${eventId ? `${eventId}: ` : ''}AI 설명 전`, 'state state-empty'));
+  wrapper.append(makeNode('p', '이 기록에 대해 아직 AI 설명을 요청하지 않았습니다. 「AI 설명 요청」을 직접 누르세요. 이전 기록의 설명은 표시하지 않습니다.', 'muted'));
   return wrapper;
 }
 
