@@ -1093,9 +1093,11 @@ function actionId(value) {
   return typeof value === 'string' && value.trim() ? safeValue(value) : '';
 }
 
+// 값이 있어 실제로 행을 추가했으면 true 를 돌려준다. 표준 DOM 에 없는 속성(예: 자식 배열)을 읽지 않기 위해 개수를 직접 센다.
 function actionRow(list, name, value) {
-  if (value === '' || value == null) return;
+  if (value === '' || value == null) return false;
   list.append(makeNode('dt', name), makeNode('dd', String(value)));
+  return true;
 }
 
 function actionSection(input) {
@@ -1167,38 +1169,40 @@ function actionSection(input) {
 
   // 받은 범위에서만 표시한다. 없는 값을 만들거나 추측하지 않는다.
   const facts = makeNode('dl', null, 'kv');
-  actionRow(facts, '사건 ID', eventId ? safeValue(eventId) : '');
+  let factCount = 0;
+  const addFact = (name, value) => { if (actionRow(facts, name, value)) factCount += 1; };
+  addFact('사건 ID', eventId ? safeValue(eventId) : '');
   if (event && Array.isArray(event.evidence)) {
     const ids = event.evidence.map((row) => (row && typeof row.id === 'string' ? safeValue(row.id) : '')).filter(Boolean);
-    actionRow(facts, '근거 ID', ids.join(', '));
+    addFact('근거 ID', ids.join(', '));
   }
-  actionRow(facts, '조치(actionId)', actionId(actionName));
+  addFact('조치(actionId)', actionId(actionName));
   if (target) {
-    actionRow(facts, '실제 대상(target.id)', typeof target.id === 'string' ? safeValue(target.id) : '');
-    actionRow(facts, '대상 세대(generation)', Number.isSafeInteger(target.generation) ? target.generation : '');
+    addFact('실제 대상(target.id)', typeof target.id === 'string' ? safeValue(target.id) : '');
+    addFact('대상 세대(generation)', Number.isSafeInteger(target.generation) ? target.generation : '');
   }
   if (receipt) {
-    actionRow(facts, '요청 ID(requestId)', requestId ? safeValue(requestId) : '');
-    actionRow(facts, '영수증 ID(receiptId)', typeof receipt.receiptId === 'string' && receipt.receiptId ? safeValue(receipt.receiptId) : '');
-    actionRow(facts, '버전(version)', Number.isSafeInteger(receipt.version) ? receipt.version : '');
+    addFact('요청 ID(requestId)', requestId ? safeValue(requestId) : '');
+    addFact('영수증 ID(receiptId)', typeof receipt.receiptId === 'string' && receipt.receiptId ? safeValue(receipt.receiptId) : '');
+    addFact('버전(version)', Number.isSafeInteger(receipt.version) ? receipt.version : '');
   }
   if (key === 'prepared' || key === 'expired') {
     const expires = source.confirmationExpiresAt;
-    actionRow(facts, '확인 기한', typeof expires === 'string' && expires.trim() ? eventTime(expires) : '확인 불가');
+    addFact('확인 기한', typeof expires === 'string' && expires.trim() ? eventTime(expires) : '확인 불가');
   }
   if (key === 'succeeded') {
-    actionRow(facts, '관측 시각(observedAt)', eventTime(observation.observedAt));
-    actionRow(facts, '실제 효과(effectApplied)', 'effectApplied: true');
-    if (!(typeof receipt?.receiptId === 'string' && receipt.receiptId)) actionRow(facts, '영수증 ID(receiptId)', '확인 불가');
+    addFact('관측 시각(observedAt)', eventTime(observation.observedAt));
+    addFact('실제 효과(effectApplied)', 'effectApplied: true');
+    if (!(typeof receipt?.receiptId === 'string' && receipt.receiptId)) addFact('영수증 ID(receiptId)', '확인 불가');
   }
-  if (facts.kids.length > 0) wrapper.append(facts);
+  if (factCount > 0) wrapper.append(facts);
   if (receipt && receipt.superseded === true) {
     wrapper.append(makeNode('p', '이전 조회는 최신 결과를 대신하지 않습니다(superseded).', 'muted'));
   }
   wrapper.append(makeNode('p', ACTION_BUTTON_GUIDE, 'muted'));
 
   // 성공적으로 그린 요청 화면에만 표식을 붙인다. 요청 자체가 없거나(idle) 처리되지 않았으면(error) 붙이지 않는다.
-  if (key !== 'idle' && key !== 'error' && eventId && requestId) {
+  if (known && key !== 'idle' && key !== 'error' && eventId && requestId) {
     wrapper.setAttribute('data-student-action-event', eventId);
     wrapper.setAttribute('data-student-action-request', requestId);
   }
