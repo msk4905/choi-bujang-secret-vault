@@ -25,7 +25,7 @@
 | 앱 시작 틀 버전 | 0.2.11 (`on-client/package.json`의 `version`) |
 | 이 기록의 제출 커밋(S) | T 뒤에 이 문서(와 21단계 설명서의 경로 표현)만 더한 커밋. 문서 안에 자기 자신의 해시를 적을 수 없으므로 제출 화면에 입력한 커밋과 `git diff T S`로 대조합니다. |
 
-T에서 S까지 `on-client/student/extension.mjs`와 서버·화면 코드는 바꾸지 않았습니다. [미확인: 확인 9에서 `git diff`로 대조 전]
+T에서 S까지 `on-client/student/extension.mjs`와 서버·화면 코드는 바꾸지 않았습니다. `git diff --stat b464e8068a3b6aea6b028b248bc4f14c34756f17 1a00a80f3ee4f80643b4007d0c10b6f736d345c9 -- on-client`의 출력이 비어 있어 T의 `on-client`가 `main`(재현 시점)과 같음을 확인했습니다. [학생 진술] 이 대조는 T까지의 결과이며, S(이 문서를 더한 커밋)와 T의 차이는 제출 뒤 `git diff T S`로 따로 확인합니다. [미확인]
 
 ## 2. 재현 환경
 
@@ -107,7 +107,7 @@ T에서 S까지 `on-client/student/extension.mjs`와 서버·화면 코드는 �
 - 앱 서버는 프로젝트 폴더에 파일을 쓰지 않습니다. [원문 확인] `src/`·`vendor/`·`student/`·`public/`에서 `writeFile` 등 파일 쓰기 호출을 찾지 못했고, 파일 사용은 읽기뿐임. [학생 진술] 새 폴더에서 실행·종료·재실행한 뒤 `git status --short`가 비어 있음.
 - 화면의 판정·조회 결과·기록은 서버를 다시 켜거나 브라우저를 새로고침하면 다시 불러오며, 이전 결과를 파일로 남기지 않습니다. [학생 진술] 재실행 뒤 화면이 새로 시작됨.
 - 운영자가 별도 설정 파일을 줄 때만 쓰이는 저장소 두 곳이 있으며, 학생 실행에서는 쓰지 않았습니다. [원문 확인] `src/connection/native-context.mjs`, `src/ai/credential-vault.mjs`(운영자가 구성한 외부 호스트 프로그램에 맡겨 보관), `src/actions/store.mjs`(운영자가 주는 기존 SQLite DB에 조치 기록을 추가). 이 보관 폴더와 DB는 운영자가 관리하며 이 저장소에 넣지 않습니다. 사용하지 않았으므로 동작은 [미확인].
-- `.env`와 같은 인증 관련 파일은 `.gitignore`가 제외하며(`.env`, `.env.*`, `node_modules/` 등), 문서와 커밋에 실제 값을 적지 않습니다. [원문 확인] `.gitignore`
+- 실제 설정 파일(`.env`, `.env.*`)과 `node_modules/` 등은 `.gitignore`가 제외하며, 값이 없는 설정 예시 `.env.example`만 예외(`!.env.example`)로 추적합니다. 문서와 커밋에 실제 값을 적지 않습니다. [원문 확인] `.gitignore`, `on-client/.env.example`
 
 ### 6.3 백업
 
@@ -130,7 +130,7 @@ T에서 S까지 `on-client/student/extension.mjs`와 서버·화면 코드는 �
 ## 7. 이동 가능한 구성
 
 - 다른 환경에서 필요한 파일은 `on-client` 폴더 전체입니다. 설치 절차는 Node.js 24.19.0 준비(`package.json`의 `engines.node`가 이 값으로 고정됨) 후 `on-client` 폴더에서 실행 명령 한 줄입니다. 외부 패키지 설치는 없습니다.
-- 설정 예시는 `on-client/.env.example`이며 실제 값이 없는 설정(포트, 어댑터 경로, 허용 패키지 목록 비어 있음)만 있습니다. 이 문서의 명령과 설명은 특정 PC의 절대 경로나 인증 값에 의존하지 않습니다.
+- 설정 예시는 `on-client/.env.example`(저장소에 포함됨)이며 실제 값이 없는 설정(포트, 어댑터 경로, 허용 패키지 목록 비어 있음)만 있습니다. 이 문서의 명령과 설명은 특정 PC의 절대 경로나 인증 값에 의존하지 않습니다.
 - 실제 시스템(기존 접속·XDR 엔진)·AI 연결은 운영자가 따로 주는 설정 파일로만 켭니다. 이 연결을 새 환경에서 재현한 것은 없습니다. [미확인]
 
 ## 8. 버전과 지원 범위
