@@ -55,7 +55,7 @@ choi-bujang-secret-vault/        Git 최상위 (커밋은 여기서)
 1. 파일 탐색기에서 `on-client` 폴더를 엽니다.
 2. 주소 표시줄에 `powershell`을 입력하고 Enter를 누릅니다. 그러면 `on-client` 폴더에서 PowerShell이 열립니다.
 
-실제 작업 위치(내 PC): `C:\Users\Administrator\Desktop\Keshev\choi-bujang-secret-vault\on-client`
+작업 위치: 프로젝트 최상위 폴더 아래의 `on-client` 폴더(폴더의 PC 위치는 사람마다 다르므로 이 문서는 특정 경로에 의존하지 않습니다.)
 
 ### 4.2 예제 자료로 실행 (실제 연결 없음)
 
